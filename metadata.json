@@ -1,0 +1,5 @@
+{
+  "name": "Sentinel: Global Emergency Monitor",
+  "description": "Real-time monitoring of global emergencies and DEFCON status using AI-powered search grounding.",
+  "requestFramePermissions": ["geolocation"]
+}
