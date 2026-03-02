@@ -121,6 +121,14 @@ const Header: React.FC<HeaderProps> = ({
             <Zap className="w-3 h-3 fill-white" />
             <span className="hidden sm:inline">Ask Gemini</span>
           </a>
+
+          <button 
+            onClick={() => setIsAboutOpen(true)}
+            className="flex items-center gap-2 px-3 py-1.5 bg-white/5 border border-white/10 hover:bg-white/10 text-white rounded-full text-[9px] font-black uppercase tracking-widest transition-all active:scale-95 shadow-[0_0_10px_rgba(255,255,255,0.05)] shrink-0"
+          >
+            <Info className="w-3 h-3" />
+            <span className="hidden sm:inline">About Sentinel</span>
+          </button>
         </div>
 
         {/* Controls Group */}
@@ -131,13 +139,6 @@ const Header: React.FC<HeaderProps> = ({
               className="p-1.5 hover:bg-white/5 rounded-full transition-colors text-white/40 hover:text-white"
             >
               {theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
-            </button>
-            <button 
-              onClick={() => setIsAboutOpen(true)}
-              className="p-1.5 hover:bg-white/5 rounded-full transition-colors text-white/40 hover:text-white"
-              title="About Sentinel"
-            >
-              <Info className="w-4 h-4" />
             </button>
             <button 
               onClick={() => setIsHistoryOpen(true)}

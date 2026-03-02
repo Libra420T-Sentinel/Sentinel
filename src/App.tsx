@@ -36,13 +36,21 @@ import {
   Info,
   Briefcase,
   Users,
-  Target
+  Target,
+  CheckCircle2,
+  AlertCircle,
+  ShieldCheck,
+  TrendingUp,
+  Orbit,
+  Cpu,
+  Sun
 } from 'lucide-react';
 import Header from './components/Header';
 import SettingsModal from './components/SettingsModal';
 import HistoryModal from './components/HistoryModal';
 import AboutModal from './components/AboutModal';
 import CriticalAlertBanner from './components/CriticalAlertBanner';
+import DefconOneOverlay from './components/DefconOneOverlay';
 import { cn } from './utils';
 
 import Markdown from 'react-markdown';
@@ -77,7 +85,7 @@ interface Emergency {
   id: string;
   title: string;
   severity: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW';
-  category: 'WARFARE' | 'EARTHQUAKE' | 'FIRE' | 'NATURAL_DISASTER' | 'HEALTH' | 'OTHER';
+  category: 'WARFARE' | 'EARTHQUAKE' | 'FIRE' | 'NATURAL_DISASTER' | 'HEALTH' | 'CYBER' | 'ECONOMY' | 'SPACE' | 'TERRORISM' | 'FINANCE' | 'STOCK' | 'AGRICULTURE' | 'OTHER';
   location: string;
   coordinates?: { lat: number; lng: number };
   summary: string;
@@ -524,10 +532,7 @@ export default function App() {
   const [activeLocation, setActiveLocation] = useState('Global');
   const [selectedCategory, setSelectedCategory] = useState<string>('ALL');
   const [isBannerDismissed, setIsBannerDismissed] = useState(false);
-  const [startDate, setStartDate] = useState<string>('');
-  const [endDate, setEndDate] = useState<string>('');
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
-  const [sortBy, setSortBy] = useState<'severity' | 'date'>('severity');
   const [isPanicMode, setIsPanicMode] = useState(false);
 
   const togglePanicMode = useCallback(() => {
@@ -543,12 +548,21 @@ export default function App() {
   const [lastScrollY, setLastScrollY] = useState(0);
   const [isLiveRecon, setIsLiveRecon] = useState(false);
   const [seenIds, setSeenIds] = useState<Set<string>>(new Set());
-  const [severityThreshold, setSeverityThreshold] = useState<'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW'>('HIGH');
   const [isAboutOpen, setIsAboutOpen] = useState(false);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isDefconInfoOpen, setIsDefconInfoOpen] = useState(false);
+  const [isDefconOneOpen, setIsDefconOneOpen] = useState(false);
   const [theme, setTheme] = useState<'dark' | 'light'>('dark');
+
+  // Trigger DEFCON 1 Overlay
+  useEffect(() => {
+    if (status?.defcon_level === 1) {
+      if (!isDefconOneOpen) setIsDefconOneOpen(true);
+    } else {
+      setIsDefconOneOpen(false);
+    }
+  }, [status?.defcon_level]);
 
   // Combine presidential interruption and critical emergencies for high-priority alerts
   const highPriorityAlerts = useMemo(() => {
@@ -592,12 +606,11 @@ export default function App() {
   useEffect(() => {
     const handleScroll = () => {
       const currentScrollY = window.scrollY;
-      if (currentScrollY > lastScrollY && currentScrollY > 100) {
+      if (currentScrollY > 50) {
         setShowHeader(false);
       } else {
         setShowHeader(true);
       }
-      setLastScrollY(currentScrollY);
     };
 
     window.addEventListener('scroll', handleScroll, { passive: true });
@@ -617,6 +630,61 @@ export default function App() {
       const url = URL.createObjectURL(file);
       setCustomSoundUrl(url);
     }
+  };
+
+  // Link Health Validation Hook
+  const useLinkHealth = (url: string | undefined) => {
+    const [health, setHealth] = useState<{ valid: boolean; official: boolean; loading: boolean }>({
+      valid: false,
+      official: false,
+      loading: !!url
+    });
+
+    useEffect(() => {
+      if (!url) return;
+      
+      const validate = async () => {
+        try {
+          const res = await fetch(`/api/validate-url?url=${encodeURIComponent(url)}`);
+          const data = await res.json();
+          setHealth({ valid: data.valid, official: data.official, loading: false });
+        } catch (e) {
+          setHealth({ valid: false, official: false, loading: false });
+        }
+      };
+
+      validate();
+    }, [url]);
+
+    return health;
+  };
+
+  const LinkStatus = ({ url }: { url: string | undefined }) => {
+    const { valid, official, loading } = useLinkHealth(url);
+    
+    if (!url || loading) return null;
+    
+    return (
+      <div className="flex items-center gap-1 mt-1">
+        {valid ? (
+          <div className="flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/20">
+            <CheckCircle2 className="w-2.5 h-2.5 text-emerald-500" />
+            <span className="text-[7px] font-bold text-emerald-500 uppercase tracking-tighter">Verified</span>
+          </div>
+        ) : (
+          <div className="flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-red-500/10 border border-red-500/20">
+            <AlertCircle className="w-2.5 h-2.5 text-red-500" />
+            <span className="text-[7px] font-bold text-red-500 uppercase tracking-tighter">Unstable</span>
+          </div>
+        )}
+        {official && (
+          <div className="flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-blue-500/10 border border-blue-500/20">
+            <ShieldCheck className="w-2.5 h-2.5 text-blue-500" />
+            <span className="text-[7px] font-bold text-blue-500 uppercase tracking-tighter">Official</span>
+          </div>
+        )}
+      </div>
+    );
   };
 
   // WebSocket Integration
@@ -666,10 +734,11 @@ export default function App() {
     try {
       // Create GoogleGenAI instance right before API call to ensure it uses the most up-to-date key
       const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
+      const userLanguage = navigator.language || 'en-US';
       
       const systemInstruction = `You are an expert intelligence analyst whose job is to translate complex geopolitical and crisis data for the general public. 
       Your audience is not highly tech-savvy, has a short attention span, and needs to understand the immediate impact of an event within three seconds.
-      Write at an 8th-grade reading level. No academic jargon, no long-winded explanations, and no walls of text. 
+      Write at an 8th-grade reading level in the user's language: ${userLanguage}. No academic jargon, no long-winded explanations, and no walls of text. 
       
       Whenever you provide a summary or description of a global event, you MUST format it exactly like this:
       🚨 [3-5 WORD HEADLINE IN ALL CAPS]
@@ -684,6 +753,8 @@ export default function App() {
       - Keep bullet points under 15 words each.
       - Do not use prefatory language. Just output the requested format directly.
       - ALWAYS use the googleSearch tool to find REAL, VALID, and DIRECT URLs for articles, live streams, and sources. Do not hallucinate URLs.
+      - IMPORTANT: Do not construct URLs based on patterns (e.g., appending the current year '2026' to a news site URL). Only use URLs that are explicitly returned by the googleSearch tool and verified as active.
+      - If you cannot find a specific article URL for an event, provide the main news landing page of a reputable source (e.g., reuters.com, apnews.com) instead of a broken deep link.
       - IMPORTANT: When asked for JSON output, ONLY output the raw JSON object. DO NOT include any thinking process, "thought" blocks, conversational text, or markdown formatting outside the JSON. Your response must be a valid JSON string that can be parsed by JSON.parse().
       - Rule: You must output your response ONLY as a valid JSON object. Do not include any markdown styling or extra text.`;
 
@@ -696,19 +767,34 @@ export default function App() {
       
       For each emergency:
       1. Provide approximate latitude and longitude coordinates.
-      2. Categorize it into one of: WARFARE, EARTHQUAKE, FIRE, NATURAL_DISASTER, HEALTH, OTHER. Weather events should be NATURAL_DISASTER.
+      2. Categorize it into one of: WARFARE, EARTHQUAKE, FIRE, NATURAL_DISASTER, HEALTH, CYBER, ECONOMY, SPACE, TERRORISM, FINANCE, STOCK, AGRICULTURE, OTHER. 
+      - Weather events should be NATURAL_DISASTER.
+      - Hacking, data breaches, and infrastructure attacks should be CYBER.
+      - Market crashes, hyperinflation, and trade wars should be ECONOMY.
+      - Solar flares and satellite failures should be SPACE.
+      - Insurgency and extremist attacks should be TERRORISM.
+      - Banking crises, currency devaluations, and fiscal policy shocks should be FINANCE.
+      - Major stock market crashes or volatility should be STOCK.
+      - Crop failures, food shortages, and agricultural crises should be AGRICULTURE.
+      
+      STRICT REQUIREMENT: For EVERY emergency tab (CYBER, ECONOMY, SPACE, TERRORISM, FINANCE, STOCK, AGRICULTURE, etc.), you MUST find and provide REAL, OFFICIAL article URLs from reputable sources like Reuters, AP, BBC, or government agencies.
+      
       3. For EARTHQUAKE events (especially HIGH or CRITICAL severity), include the magnitude or intensity (e.g., Richter scale).
       4. Provide an approximate timestamp of occurrence in ISO format.
       
       Also, check if there are any high-priority live interruptions or emergency broadcasts from the U.S. President or NATO [Breaking News] that are currently relevant or very recent. 
-      If a live stream is available, prioritize official sources like:
+      STRICT REQUIREMENT: Only provide links from OFFICIAL and VERIFIED sources.
+      Prioritize:
       - White House YouTube: https://www.youtube.com/@WhiteHouse/live
       - C-SPAN YouTube: https://www.youtube.com/@CSPAN/live
       - Reuters YouTube: https://www.youtube.com/@Reuters/live
       - NATO News: https://www.youtube.com/@NATO/live
+      - AP News: https://apnews.com
+      - Reuters: https://www.reuters.com
       Ensure the URL is a direct link to the live broadcast or a highly credible news landing page. 
       If no direct live stream is found but the event is real, provide a link to a major news coverage page from a reputable source (AP, Reuters, BBC, NATO official site).
-      Include an 'article_url' if there is a specific news article or official statement page for the event.`;
+      Include an 'article_url' if there is a specific news article or official statement page for the event.
+      DO NOT provide broken, dead, or non-official links. If you are unsure of a link's validity, do not include it. If search fails to find a specific article, use the homepage of a major news outlet (e.g., https://www.reuters.com).`;
 
       const statusResponse = await ai.models.generateContent({
         model: "gemini-3-flash-preview",
@@ -738,7 +824,7 @@ export default function App() {
                     },
                     category: {
                       type: Type.STRING,
-                      description: "One of: WARFARE, EARTHQUAKE, FIRE, NATURAL_DISASTER, HEALTH, OTHER"
+                      description: "One of: WARFARE, EARTHQUAKE, FIRE, NATURAL_DISASTER, HEALTH, CYBER, ECONOMY, SPACE, TERRORISM, FINANCE, STOCK, AGRICULTURE, OTHER"
                     },
                     location: { type: Type.STRING },
                     coordinates: {
@@ -789,9 +875,8 @@ export default function App() {
 
       // Fetch Strategic Briefings
       const briefingPrompt = `Provide 3 strategic briefings on major global trends or under-the-radar geopolitical shifts as of ${new Date().toISOString()}. 
-      Focus on supply chain, food security, and energy stability. 
-      For each briefing, provide a 'source_url' to a legitimate news article or official report (e.g., from Reuters, AP, UN, IEA).
-      Return a JSON array of objects with: id, title, summary, impact_level (HIGH, MEDIUM, LOW), source, source_url.`;
+      Focus on supply chain, food security, energy stability, and cyber-infrastructure. 
+      Return a JSON array of objects with: id, title, summary, impact_level (HIGH, MEDIUM, LOW), source.`;
 
       const briefingResponse = await ai.models.generateContent({
         model: "gemini-3-flash-preview",
@@ -810,10 +895,9 @@ export default function App() {
                 title: { type: Type.STRING },
                 summary: { type: Type.STRING, description: "Follow the strict 🚨 format provided in system instructions." },
                 impact_level: { type: Type.STRING },
-                source: { type: Type.STRING },
-                source_url: { type: Type.STRING, description: "REAL, VALID URL to the source article." }
+                source: { type: Type.STRING }
               },
-              required: ["id", "title", "summary", "impact_level", "source", "source_url"]
+              required: ["id", "title", "summary", "impact_level", "source"]
             }
           }
         }
@@ -830,8 +914,10 @@ export default function App() {
       3. Current Status (STABLE, ELEVATED, CRITICAL) based on their recent geopolitical actions or domestic stability.
       4. A list of 3-4 recent significant actions or statements.
       5. A list of allies and conflicts (names of other countries or leaders).
-      6. Associated crisis nodes (objects with 'title' and 'url' to a REAL news article about their involvement).
+      6. Associated crisis nodes (objects with 'title' and 'url' to a REAL, OFFICIAL news article about their involvement). 
+         STRICT REQUIREMENT: If a leader is associated with a "dossier" (e.g., Trump Dossier, Steele Dossier, or any other intelligence dossier), you MUST provide a link to an OFFICIAL and RELIABLE article from a major news outlet (Reuters, AP, BBC, etc.).
       7. A REAL, HIGH-QUALITY portrait URL. Prioritize official government sites (.gov), Wikipedia, or verified social media profile images (X, Facebook, etc.). Ensure the URL is direct to the image file.
+      STRICT REQUIREMENT: All news links must be from official sources (Reuters, AP, BBC, Government sites).
       Return a JSON array of objects with: id, name, title, country, status, portrait_url, recent_actions, allies, conflicts, associated_crises.`;
 
       const leaderResponse = await ai.models.generateContent({
@@ -936,7 +1022,7 @@ export default function App() {
       // Trigger notification if DEFCON is 1 or 2, or if there's an emergency meeting threshold
       const thresholdMet = newStatus.emergencies.some(e => {
         const levels = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'];
-        return levels.indexOf(e.severity) <= levels.indexOf(severityThreshold);
+        return levels.indexOf(e.severity) <= levels.indexOf('HIGH');
       });
 
       if (notificationsEnabled) {
@@ -948,7 +1034,7 @@ export default function App() {
         } else if (thresholdMet) {
           const urgent = newStatus.emergencies.find(e => {
             const levels = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'];
-            return levels.indexOf(e.severity) <= levels.indexOf(severityThreshold);
+            return levels.indexOf(e.severity) <= levels.indexOf('HIGH');
           });
           if (urgent) {
             new Notification(`EMERGENCY ALERT [${urgent.severity}]: ${urgent.title}`, {
@@ -964,7 +1050,7 @@ export default function App() {
     } finally {
       setLoading(false);
     }
-  }, [notificationsEnabled, searchLocation, isPanicMode, seenIds, severityThreshold]);
+  }, [notificationsEnabled, searchLocation, isPanicMode, seenIds]);
 
   useEffect(() => {
     fetchStatus();
@@ -1034,51 +1120,11 @@ export default function App() {
 
   const filteredEmergencies = status?.emergencies
     .filter(e => {
-      const categoryMatch = selectedCategory === 'ALL' || e.category === selectedCategory;
-      const dateMatch = (!startDate || new Date(e.timestamp) >= new Date(startDate)) &&
-                        (!endDate || new Date(e.timestamp) <= new Date(endDate));
-      return categoryMatch && dateMatch;
+      return selectedCategory === 'ALL' || e.category === selectedCategory;
     })
     .sort((a, b) => {
-      if (sortBy === 'severity') {
-        return severityOrder[a.severity] - severityOrder[b.severity];
-      } else {
-        return new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime();
-      }
+      return severityOrder[a.severity] - severityOrder[b.severity];
     }) || [];
-
-  const exportToCSV = () => {
-    if (filteredEmergencies.length === 0) return;
-    
-    const headers = ['ID', 'Title', 'Severity', 'Category', 'Location', 'Timestamp', 'Summary'];
-    const rows = filteredEmergencies.map(e => [
-      e.id,
-      `"${e.title.replace(/"/g, '""')}"`,
-      e.severity,
-      e.category,
-      `"${e.location.replace(/"/g, '""')}"`,
-      e.timestamp,
-      `"${e.summary.replace(/"/g, '""')}"`
-    ]);
-    
-    const csvContent = [headers, ...rows].map(r => r.join(',')).join('\n');
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement('a');
-    const url = URL.createObjectURL(blob);
-    link.setAttribute('href', url);
-    link.setAttribute('download', `sentinel_report_${format(new Date(), 'yyyyMMdd_HHmm')}.csv`);
-    link.style.visibility = 'hidden';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  };
-
-  const clearAllFilters = () => {
-    setSelectedCategory('ALL');
-    setStartDate('');
-    setEndDate('');
-    setSortBy('severity');
-  };
 
   const toggleExpand = (id: string) => {
     const newExpanded = new Set(expandedIds);
@@ -1091,11 +1137,17 @@ export default function App() {
   };
 
   const categories = [
-    { id: 'ALL', label: 'All Events', icon: Globe },
+    { id: 'ALL', label: 'All Intelligence', icon: Globe },
     { id: 'WARFARE', label: 'Warfare', icon: ShieldAlert },
-    { id: 'EARTHQUAKE', label: 'Earthquakes', icon: Activity },
-    { id: 'FIRE', label: 'Fires', icon: Zap },
-    { id: 'NATURAL_DISASTER', label: 'Natural Disasters', icon: AlertTriangle },
+    { id: 'CYBER', label: 'Cyber Warfare', icon: Cpu },
+    { id: 'ECONOMY', label: 'Economic Shocks', icon: TrendingUp },
+    { id: 'FINANCE', label: 'Finance', icon: Briefcase },
+    { id: 'STOCK', label: 'Stock Market', icon: Activity },
+    { id: 'AGRICULTURE', label: 'Agriculture', icon: Sun },
+    { id: 'SPACE', label: 'Space Weather', icon: Orbit },
+    { id: 'TERRORISM', label: 'Terrorism', icon: Target },
+    { id: 'EARTHQUAKE', label: 'Seismic', icon: Activity },
+    { id: 'NATURAL_DISASTER', label: 'Disasters', icon: AlertTriangle },
     { id: 'HEALTH', label: 'Health', icon: Activity },
   ];
 
@@ -1111,7 +1163,15 @@ export default function App() {
   }, [fetchStatus, isInitialScan]);
 
   return (
-    <div className="min-h-screen bg-[#0A0A0B] text-[#E4E4E7] font-sans selection:bg-red-500/30">
+    <div className={cn(
+      "min-h-screen bg-[#0A0A0B] text-[#E4E4E7] font-sans selection:bg-red-500/30 transition-all duration-1000",
+      status?.defcon_level === 1 && "defcon-1-glitch"
+    )}>
+      <DefconOneOverlay 
+        isOpen={isDefconOneOpen} 
+        onClose={() => setIsDefconOneOpen(false)}
+        cause={status?.emergencies.find(e => e.severity === 'CRITICAL')}
+      />
       <SettingsModal
         isSettingsOpen={isSettingsOpen}
         setIsSettingsOpen={setIsSettingsOpen}
@@ -1277,16 +1337,18 @@ export default function App() {
                     </div>
                     <div className="space-y-2">
                       {selectedLeader.associated_crises.map((crisis, i) => safeUrl(crisis.url) && (
-                        <a 
-                          key={i} 
-                          href={safeUrl(crisis.url)!}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="flex items-center justify-between p-3 rounded-xl bg-white/5 border border-white/10 group cursor-pointer hover:bg-white/10 transition-all"
-                        >
-                          <span className="text-[10px] font-bold text-white/80 uppercase tracking-tight">{crisis.title}</span>
-                          <ExternalLink className="w-3 h-3 text-white/20 group-hover:text-white transition-colors" />
-                        </a>
+                        <div key={i} className="space-y-1">
+                          <a 
+                            href={safeUrl(crisis.url)!}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="flex items-center justify-between p-3 rounded-xl bg-white/5 border border-white/10 group cursor-pointer hover:bg-white/10 transition-all"
+                          >
+                            <span className="text-[10px] font-bold text-white/80 uppercase tracking-tight">{crisis.title}</span>
+                            <ExternalLink className="w-3 h-3 text-white/20 group-hover:text-white transition-colors" />
+                          </a>
+                          <LinkStatus url={crisis.url} />
+                        </div>
                       ))}
                     </div>
                   </div>
@@ -1594,15 +1656,18 @@ export default function App() {
                           {anomaly.description}
                         </p>
                         {safeUrl(anomaly.link) && (
-                          <a 
-                            href={safeUrl(anomaly.link)!} 
-                            target="_blank" 
-                            rel="noopener noreferrer"
-                            onClick={(e) => e.stopPropagation()}
-                            className="inline-flex items-center gap-1 mt-2 text-[8px] font-bold text-emerald-500 hover:text-emerald-400 transition-colors uppercase tracking-widest"
-                          >
-                            Source Data <ExternalLink className="w-2 h-2" />
-                          </a>
+                          <div className="flex flex-col gap-1 mt-2">
+                            <a 
+                              href={safeUrl(anomaly.link)!} 
+                              target="_blank" 
+                              rel="noopener noreferrer"
+                              onClick={(e) => e.stopPropagation()}
+                              className="inline-flex items-center gap-1 text-[8px] font-bold text-emerald-500 hover:text-emerald-400 transition-colors uppercase tracking-widest"
+                            >
+                              Source Data <ExternalLink className="w-2 h-2" />
+                            </a>
+                            <LinkStatus url={anomaly.link} />
+                          </div>
                         )}
                       </div>
                     ))}
@@ -1645,17 +1710,6 @@ export default function App() {
                           <span className="text-[8px] font-mono text-white/60 uppercase">
                             {briefing.source}
                           </span>
-                          {safeUrl(briefing.source_url) && (
-                            <a 
-                              href={safeUrl(briefing.source_url)!} 
-                              target="_blank" 
-                              rel="noopener noreferrer"
-                              className="text-emerald-500 hover:text-emerald-400 transition-colors"
-                              title="View Source Article"
-                            >
-                              <ExternalLink className="w-3 h-3" />
-                            </a>
-                          )}
                         </div>
                       </div>
                       <h4 className="text-xs font-bold text-white mb-1.5">{briefing.title}</h4>
@@ -1739,42 +1793,23 @@ export default function App() {
                       </Markdown>
                     </div>
                     
-                    <div className="mt-4 flex flex-wrap gap-3">
-                      {('live_url' in highPriorityAlerts[currentSummaryIndex] && safeUrl(highPriorityAlerts[currentSummaryIndex].live_url)) && (
-                        <a 
-                          href={safeUrl(highPriorityAlerts[currentSummaryIndex].live_url)!}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex items-center gap-2 px-6 py-3 bg-white text-red-600 rounded-xl font-black uppercase tracking-widest text-[10px] hover:bg-white/90 transition-all shadow-lg"
-                        >
-                          <ExternalLink className="w-4 h-4" />
-                          Watch Official Stream
-                        </a>
-                      )}
-                      {('article_url' in highPriorityAlerts[currentSummaryIndex] && safeUrl(highPriorityAlerts[currentSummaryIndex].article_url)) && (
-                        <a 
-                          href={safeUrl(highPriorityAlerts[currentSummaryIndex].article_url)!}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex items-center gap-2 px-6 py-3 bg-red-700 text-white border border-white/30 rounded-xl font-black uppercase tracking-widest text-[10px] hover:bg-red-800 transition-all shadow-lg"
-                        >
-                          <Info className="w-4 h-4" />
-                          Official Briefing
-                        </a>
-                      )}
+                    <div className="mt-4 flex flex-wrap gap-3 items-center">
                       {('source_url' in highPriorityAlerts[currentSummaryIndex] && safeUrl(highPriorityAlerts[currentSummaryIndex].source_url)) && (
-                        <a 
-                          href={safeUrl(highPriorityAlerts[currentSummaryIndex].source_url)!}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex items-center gap-2 px-6 py-3 bg-black/40 text-white border border-white/20 rounded-xl font-black uppercase tracking-widest text-[10px] hover:bg-black/60 transition-all"
-                        >
-                          <Search className="w-4 h-4" />
-                          View Full Intelligence
-                        </a>
+                        <div className="flex flex-col gap-1">
+                          <a 
+                            href={safeUrl(highPriorityAlerts[currentSummaryIndex].source_url)!}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-2 px-6 py-3 bg-white text-black rounded-xl font-black uppercase tracking-widest text-[10px] hover:bg-white/90 transition-all shadow-lg"
+                          >
+                            <Search className="w-4 h-4" />
+                            View Full Intelligence
+                          </a>
+                          <LinkStatus url={highPriorityAlerts[currentSummaryIndex].source_url} />
+                        </div>
                       )}
                       <a 
-                        href={`https://www.youtube.com/results?search_query=presidential+address+live+${encodeURIComponent(highPriorityAlerts[currentSummaryIndex]?.title || '')}`}
+                        href={`https://www.youtube.com/results?search_query=live+news+${encodeURIComponent(highPriorityAlerts[currentSummaryIndex]?.title || '')}`}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="inline-flex items-center gap-2 px-6 py-3 bg-black/40 text-white border border-white/20 rounded-xl font-black uppercase tracking-widest text-[10px] hover:bg-black/60 transition-all"
@@ -1783,7 +1818,7 @@ export default function App() {
                         Search Live Coverage
                       </a>
                       <a 
-                        href={`https://www.whitehouse.gov/briefing-room/`}
+                        href="https://www.whitehouse.gov/briefing-room/"
                         target="_blank"
                         rel="noopener noreferrer"
                         className="inline-flex items-center gap-2 px-6 py-3 bg-red-800 text-white border border-white/20 rounded-xl font-black uppercase tracking-widest text-[10px] hover:bg-red-900 transition-all"
@@ -1838,94 +1873,23 @@ export default function App() {
               </div>
             </section>
 
-            {/* Filters & Sorting */}
-            <div className="space-y-6 mb-8">
-              {/* Category Filters */}
-              <div className="flex flex-wrap gap-2">
-                {categories.map((cat) => (
-                  <button
-                    key={cat.id}
-                    onClick={() => setSelectedCategory(cat.id)}
-                    className={cn(
-                      "flex items-center gap-2 px-4 py-2 rounded-full text-[10px] font-bold uppercase tracking-widest transition-all border",
-                      selectedCategory === cat.id 
-                        ? "bg-red-600 border-red-500 text-white shadow-[0_0_15px_rgba(220,38,38,0.3)]" 
-                        : "bg-white/5 border-white/10 text-white/40 hover:bg-white/10 hover:text-white/60"
-                    )}
-                  >
-                    <cat.icon className="w-3 h-3" />
-                    {cat.label}
-                  </button>
-                ))}
-              </div>
-
-              {/* Date Filters & Actions */}
-              <div className="flex flex-wrap items-center gap-4 p-4 bg-white/5 border border-white/10 rounded-2xl">
-                <div className="flex items-center gap-2">
-                  <span className="text-[10px] font-mono text-white/40 uppercase tracking-widest">Filters:</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <input 
-                    type="date" 
-                    value={startDate}
-                    onChange={(e) => setStartDate(e.target.value)}
-                    className="bg-black/40 border border-white/10 rounded px-2 py-1 text-xs text-white/80 focus:outline-none focus:border-red-500/50"
-                  />
-                  <span className="text-white/20 text-xs">to</span>
-                  <input 
-                    type="date" 
-                    value={endDate}
-                    onChange={(e) => setEndDate(e.target.value)}
-                    className="bg-black/40 border border-white/10 rounded px-2 py-1 text-xs text-white/80 focus:outline-none focus:border-red-500/50"
-                  />
-                </div>
-                
-                <div className="h-4 w-px bg-white/10 mx-2 hidden sm:block" />
-
-                <div className="flex items-center gap-2">
-                  <span className="text-[10px] font-mono text-white/40 uppercase tracking-widest">Sort:</span>
-                  <select 
-                    value={sortBy}
-                    onChange={(e) => setSortBy(e.target.value as 'severity' | 'date')}
-                    className="bg-black/40 border border-white/10 rounded px-2 py-1 text-xs text-white/80 focus:outline-none focus:border-red-500/50"
-                  >
-                    <option value="severity">Severity</option>
-                    <option value="date">Newest First</option>
-                  </select>
-                </div>
-
-                <div className="flex items-center gap-2">
-                  <span className="text-[10px] font-mono text-white/40 uppercase tracking-widest">Alert Threshold:</span>
-                  <select 
-                    value={severityThreshold}
-                    onChange={(e) => setSeverityThreshold(e.target.value as any)}
-                    className="bg-black/40 border border-white/10 rounded px-2 py-1 text-xs text-white/80 focus:outline-none focus:border-red-500/50"
-                  >
-                    <option value="CRITICAL">Critical Only</option>
-                    <option value="HIGH">High +</option>
-                    <option value="MEDIUM">Medium +</option>
-                    <option value="LOW">All Events</option>
-                  </select>
-                </div>
-
-                <div className="flex items-center gap-2 ml-auto">
-                  <button 
-                    onClick={clearAllFilters}
-                    className="flex items-center gap-2 px-3 py-1.5 bg-white/5 border border-white/10 rounded-md text-[10px] font-bold text-white/60 hover:text-white hover:bg-white/10 transition-all uppercase tracking-widest"
-                  >
-                    <FilterX className="w-3 h-3" />
-                    Clear
-                  </button>
-                  <button 
-                    onClick={exportToCSV}
-                    disabled={filteredEmergencies.length === 0}
-                    className="flex items-center gap-2 px-3 py-1.5 bg-emerald-500/10 border border-emerald-500/20 rounded-md text-[10px] font-bold text-emerald-500 hover:bg-emerald-500/20 transition-all uppercase tracking-widest disabled:opacity-50"
-                  >
-                    <Download className="w-3 h-3" />
-                    Export CSV
-                  </button>
-                </div>
-              </div>
+            {/* Topic Tabs */}
+            <div className="flex flex-wrap gap-2 mb-8">
+              {categories.map((cat) => (
+                <button
+                  key={cat.id}
+                  onClick={() => setSelectedCategory(cat.id)}
+                  className={cn(
+                    "flex items-center gap-2 px-4 py-2 rounded-full text-[10px] font-bold uppercase tracking-widest transition-all border",
+                    selectedCategory === cat.id 
+                      ? "bg-red-600 border-red-500 text-white shadow-[0_0_15px_rgba(220,38,38,0.3)]" 
+                      : "bg-white/5 border-white/10 text-white/40 hover:bg-white/10 hover:text-white/60"
+                  )}
+                >
+                  <cat.icon className="w-3 h-3" />
+                  {cat.label}
+                </button>
+              ))}
             </div>
 
             <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-6 gap-4">
@@ -1942,7 +1906,7 @@ export default function App() {
                 </h2>
               </div>
               <span className="text-[10px] font-mono text-white/40 uppercase tracking-widest">
-                {filteredEmergencies.length} Events Filtered
+                {filteredEmergencies.length} Active Intelligence Nodes
               </span>
             </div>
 
@@ -1998,7 +1962,15 @@ export default function App() {
                               <span className="bg-emerald-500 text-white text-[8px] font-black px-1.5 py-0.5 rounded animate-pulse tracking-tighter">NEW</span>
                             )}
                             <span className="text-[10px] font-mono text-white/70 uppercase tracking-widest flex items-center gap-1">
-                              <Globe className="w-3 h-3" />
+                              {emergency.category === 'WARFARE' && <ShieldAlert className="w-3 h-3" />}
+                              {emergency.category === 'CYBER' && <Cpu className="w-3 h-3" />}
+                              {emergency.category === 'ECONOMY' && <TrendingUp className="w-3 h-3" />}
+                              {emergency.category === 'SPACE' && <Orbit className="w-3 h-3" />}
+                              {emergency.category === 'TERRORISM' && <Target className="w-3 h-3" />}
+                              {emergency.category === 'EARTHQUAKE' && <Activity className="w-3 h-3" />}
+                              {emergency.category === 'NATURAL_DISASTER' && <AlertTriangle className="w-3 h-3" />}
+                              {emergency.category === 'HEALTH' && <Activity className="w-3 h-3" />}
+                              {emergency.category === 'FIRE' && <Zap className="w-3 h-3" />}
                               {emergency.location}
                             </span>
                             <span className="text-[10px] font-mono text-white/70 uppercase tracking-widest">
@@ -2055,16 +2027,19 @@ export default function App() {
                                 {emergency.summary}
                               </p>
                               {safeUrl(emergency.source_url) && (
-                                <a 
-                                  href={safeUrl(emergency.source_url)!} 
-                                  target="_blank" 
-                                  rel="noopener noreferrer"
-                                  onClick={(e) => e.stopPropagation()}
-                                  className="inline-flex items-center gap-2 text-[10px] font-bold text-red-500 hover:text-red-400 transition-colors uppercase tracking-widest"
-                                >
-                                  Official Source
-                                  <ExternalLink className="w-3 h-3" />
-                                </a>
+                                <div className="space-y-2">
+                                  <a 
+                                    href={safeUrl(emergency.source_url)!} 
+                                    target="_blank" 
+                                    rel="noopener noreferrer"
+                                    onClick={(e) => e.stopPropagation()}
+                                    className="inline-flex items-center gap-2 text-[10px] font-bold text-red-500 hover:text-red-400 transition-colors uppercase tracking-widest"
+                                  >
+                                    Official Source
+                                    <ExternalLink className="w-3 h-3" />
+                                  </a>
+                                  <LinkStatus url={emergency.source_url} />
+                                </div>
                               )}
                             </div>
                           </motion.div>
