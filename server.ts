@@ -16,6 +16,23 @@ async function startServer() {
   const PORT = 3000;
   const parser = new XMLParser();
 
+  // Helper for fetch with timeout
+  const fetchWithTimeout = async (url: string, options: any = {}, timeout = 8000) => {
+    const controller = new AbortController();
+    const id = setTimeout(() => controller.abort(), timeout);
+    try {
+      const response = await fetch(url, {
+        ...options,
+        signal: controller.signal,
+      });
+      clearTimeout(id);
+      return response;
+    } catch (e) {
+      clearTimeout(id);
+      throw e;
+    }
+  };
+
   // Broadcast function
   const broadcast = (data: any) => {
     wss.clients.forEach((client) => {
@@ -28,7 +45,7 @@ async function startServer() {
   // Data Pipeline Fetchers
   const fetchUSGS = async () => {
     try {
-      const res = await fetch("https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&minmagnitude=4.5");
+      const res = await fetchWithTimeout("https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&minmagnitude=4.5");
       const data = await res.json();
       const features = data.features || [];
       features.forEach((f: any) => {
@@ -54,7 +71,7 @@ async function startServer() {
 
   const fetchNOAASpace = async () => {
     try {
-      const res = await fetch("https://services.swpc.noaa.gov/products/alerts.json");
+      const res = await fetchWithTimeout("https://services.swpc.noaa.gov/products/alerts.json");
       const data = await res.json();
       if (!Array.isArray(data)) return;
       
@@ -79,7 +96,7 @@ async function startServer() {
 
   const fetchNOAATsunami = async () => {
     try {
-      const res = await fetch("https://www.tsunami.gov/events/xml/WEPA40.xml");
+      const res = await fetchWithTimeout("https://www.tsunami.gov/events/xml/WEPA40.xml");
       const text = await res.text();
       const data = parser.parse(text);
       const items = data.rss?.channel?.item || [];
@@ -105,15 +122,14 @@ async function startServer() {
     }
   };
 
-  const fetchOpenSky = async () => {
+  const fetchOpenSky = async (retries = 2) => {
     try {
-      // OpenSky is heavy, we just check for total count or specific patterns if we had more time
-      // For now, let's just log if it's reachable as a "Grid Tracker"
-      const res = await fetch("https://opensky-network.org/api/states/all");
+      const res = await fetchWithTimeout("https://opensky-network.org/api/states/all", {}, 5000);
+      
       if (res.ok) {
         const data = await res.json();
         const count = data.states?.length || 0;
-        if (count < 1000) { // Arbitrary "sudden drop" threshold for demo
+        if (count < 1000 && count > 0) {
           addAnomaly({
             id: `opensky-${Date.now()}`,
             source: "OPENSKY",
@@ -125,15 +141,22 @@ async function startServer() {
           });
         }
       }
-    } catch (e) {
-      console.error("OpenSky Fetch Error:", e);
+    } catch (e: any) {
+      if (e.name === 'AbortError') {
+        console.warn("OpenSky Fetch Timeout: Request aborted after 5s");
+      } else if (retries > 0) {
+        console.warn(`OpenSky Fetch Failed, retrying... (${retries} left)`);
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        return fetchOpenSky(retries - 1);
+      } else {
+        console.error("OpenSky Fetch Error:", e.message || e);
+      }
     }
   };
 
   const fetchCloudflare = async () => {
     try {
-      // Cloudflare Radar often needs Auth, but we'll try the public endpoint if it exists
-      const res = await fetch("https://api.cloudflare.com/client/v4/radar/annotations/outages");
+      const res = await fetchWithTimeout("https://api.cloudflare.com/client/v4/radar/annotations/outages");
       if (res.ok) {
         const data = await res.json();
         const outages = data.result?.outages || [];
@@ -164,7 +187,7 @@ async function startServer() {
     
     for (const url of feeds) {
       try {
-        const res = await fetch(url);
+        const res = await fetchWithTimeout(url);
         const text = await res.text();
         const data = parser.parse(text);
         const items = data.rss?.channel?.item || [];
@@ -198,7 +221,7 @@ async function startServer() {
     const apiKey = process.env.FMP_API_KEY;
     if (!apiKey) return;
     try {
-      const res = await fetch(`https://financialmodelingprep.com/api/v3/quotes/commodity?apikey=${apiKey}`);
+      const res = await fetchWithTimeout(`https://financialmodelingprep.com/api/v3/quotes/commodity?apikey=${apiKey}`);
       if (!res.ok) return;
       const data = await res.json();
       if (!Array.isArray(data)) return;
@@ -230,8 +253,7 @@ async function startServer() {
     const apiKey = process.env.NEWSCATCHER_API_KEY;
     if (!apiKey) return;
     try {
-      // Updated host to v3-api.newscatcherapi.com which is the standard for V3
-      const res = await fetch("https://v3-api.newscatcherapi.com/v3/search_events", {
+      const res = await fetchWithTimeout("https://v3-api.newscatcherapi.com/v3/search_events", {
         method: "POST",
         headers: { "x-api-key": apiKey, "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -264,8 +286,7 @@ async function startServer() {
 
   const fetchGSCPI = async () => {
     try {
-      // Scrape simulation or direct check if possible
-      const res = await fetch("https://www.newyorkfed.org/research/policy/gscpi");
+      const res = await fetchWithTimeout("https://www.newyorkfed.org/research/policy/gscpi");
       if (res.ok) {
         // In a real scenario, we'd parse the HTML for the latest index value
         // For now, we'll simulate a "Pressure Spike" if we detect certain keywords
@@ -343,6 +364,42 @@ async function startServer() {
 
   app.get("/api/anomalies", (req, res) => {
     res.json(anomalies);
+  });
+
+  app.get("/api/validate-url", async (req, res) => {
+    const url = req.query.url as string;
+    if (!url) return res.status(400).json({ error: "URL is required" });
+
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 3000);
+      
+      const response = await fetch(url, { 
+        method: "HEAD", 
+        signal: controller.signal,
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+      });
+      clearTimeout(timeoutId);
+
+      const isOfficial = url.includes(".gov") || 
+                        url.includes("reuters.com") || 
+                        url.includes("apnews.com") || 
+                        url.includes("bbc.com") || 
+                        url.includes("un.org") ||
+                        url.includes("nato.int") ||
+                        url.includes("whitehouse.gov");
+
+      res.json({ 
+        valid: response.ok, 
+        status: response.status,
+        official: isOfficial,
+        timestamp: new Date().toISOString()
+      });
+    } catch (e) {
+      res.json({ valid: false, error: "Timeout or Connection Error", official: false });
+    }
   });
 
   // Vite middleware for development
