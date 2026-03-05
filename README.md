@@ -2,7 +2,7 @@
   <img src="./assets/logo.png" alt="Sentinel Logo" width="200">
 </p>
 
-# 🛡️ Sentinel Global Emergency Monitor
+# 🛡️ Sovereign-Resilience Global Monitor
 
 > Real-time Global Situational Awareness & Geopolitical Intelligence Dashboard.
 
