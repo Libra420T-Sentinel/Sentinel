@@ -41,16 +41,23 @@ const AboutModal: React.FC<AboutModalProps> = ({
                 <ShieldAlert className="w-7 h-7 text-red-500" />
               </div>
               <div>
-                <h2 className="text-2xl font-black uppercase tracking-tighter">Sentinel Protocol</h2>
+                <h2 className="text-2xl font-black uppercase tracking-tighter">Sovereign-Resilience Protocol</h2>
                 <p className="text-[10px] font-mono text-white/40 uppercase tracking-widest">Global Emergency Monitoring System</p>
               </div>
             </div>
 
             <div className="space-y-6 text-white/70 leading-relaxed">
               <section>
+                <h3 className="text-white font-bold uppercase text-xs tracking-widest mb-2">Definition</h3>
+                <p className="text-sm italic border-l-2 border-emerald-500 pl-4 py-1 bg-emerald-500/5 rounded-r-lg">
+                  "The strategic capability of an entity to maintain absolute autonomy and functional independence through self-sufficient systems that can endure and recover from external disruptions without relying on outside intervention or permission."
+                </p>
+              </section>
+
+              <section>
                 <h3 className="text-white font-bold uppercase text-xs tracking-widest mb-2">Purpose</h3>
                 <p className="text-sm">
-                  Sentinel is an advanced monitoring platform designed to aggregate, analyze, and visualize global emergencies in real-time. By leveraging cutting-edge AI and open-source intelligence, it provides a unified dashboard for tracking conflicts, natural disasters, and geopolitical tensions.
+                  Sovereign-Resilience is an advanced monitoring platform designed to aggregate, analyze, and visualize global emergencies in real-time. By leveraging cutting-edge AI and open-source intelligence, it provides a unified dashboard for tracking conflicts, natural disasters, and geopolitical tensions.
                 </p>
               </section>
 

@@ -115,7 +115,7 @@ const DefconOneOverlay: React.FC<DefconOneOverlayProps> = ({ isOpen, onClose, ca
                   <span className="text-[10px] font-mono text-red-500 uppercase font-bold">System Lockdown Active</span>
                 </div>
                 <p className="text-[10px] font-mono text-white/30 uppercase">
-                  Sentinel v4.0.2 // Auth: Level 5
+                  Sovereign-Resilience v4.0.2 // Auth: Level 5
                 </p>
               </div>
             </div>

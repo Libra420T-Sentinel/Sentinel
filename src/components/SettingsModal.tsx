@@ -52,7 +52,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
               </div>
               <div>
                 <h2 className="text-2xl font-black uppercase tracking-tighter">System Settings</h2>
-                <p className="text-[10px] font-mono text-white/40 uppercase tracking-widest">Configure Sentinel Interface</p>
+                <p className="text-[10px] font-mono text-white/40 uppercase tracking-widest">Configure Sovereign-Resilience Interface</p>
               </div>
             </div>
 

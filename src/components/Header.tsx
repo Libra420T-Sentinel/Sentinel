@@ -85,7 +85,7 @@ const Header: React.FC<HeaderProps> = ({
               <ShieldAlert className="w-5 h-5 text-white" />
             </div>
             <div className="hidden lg:block">
-              <h1 className="text-sm font-bold tracking-tight uppercase leading-none">Sentinel</h1>
+              <h1 className="text-sm font-bold tracking-tight uppercase leading-none">Sovereign-Resilience</h1>
               <p className="text-[8px] font-mono text-white/40 uppercase tracking-widest leading-none mt-0.5">Global Emergency Monitor</p>
             </div>
           </div>
@@ -127,7 +127,7 @@ const Header: React.FC<HeaderProps> = ({
             className="flex items-center gap-2 px-3 py-1.5 bg-white/5 border border-white/10 hover:bg-white/10 text-white rounded-full text-[9px] font-black uppercase tracking-widest transition-all active:scale-95 shadow-[0_0_10px_rgba(255,255,255,0.05)] shrink-0"
           >
             <Info className="w-3 h-3" />
-            <span className="hidden sm:inline">About Sentinel</span>
+            <span className="hidden sm:inline">About Sovereign-Resilience</span>
           </button>
         </div>
 
