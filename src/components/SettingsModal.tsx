@@ -1,13 +1,11 @@
 import React from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence } from 'motion/react';
 import { Settings, X, Volume2, Music, Sun, Moon } from 'lucide-react';
 import { cn } from '../utils';
 
 interface SettingsModalProps {
   isSettingsOpen: boolean;
   setIsSettingsOpen: (isOpen: boolean) => void;
-  theme: 'light' | 'dark';
-  setTheme: (theme: 'light' | 'dark') => void;
   handleSoundUpload: (e: React.ChangeEvent<HTMLInputElement>) => void;
   customSoundUrl: string | null;
   setCustomSoundUrl: (url: string | null) => void;
@@ -17,8 +15,6 @@ interface SettingsModalProps {
 const SettingsModal: React.FC<SettingsModalProps> = ({
   isSettingsOpen,
   setIsSettingsOpen,
-  theme,
-  setTheme,
   handleSoundUpload,
   customSoundUrl,
   setCustomSoundUrl,
@@ -52,7 +48,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
               </div>
               <div>
                 <h2 className="text-2xl font-black uppercase tracking-tighter">System Settings</h2>
-                <p className="text-[10px] font-mono text-white/40 uppercase tracking-widest">Configure Sentinel Interface</p>
+                <p className="text-[10px] font-mono text-white/40 uppercase tracking-widest">Configure Sovereign-Resilience Intelligence Network Interface</p>
               </div>
             </div>
 
@@ -82,33 +78,6 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
                     className="w-full py-3 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl text-xs font-bold uppercase tracking-widest transition-all"
                   >
                     Test Alert Sound
-                  </button>
-                </div>
-              </section>
-
-              <section>
-                <h3 className="text-white font-bold uppercase text-[10px] tracking-widest mb-4 flex items-center gap-2">
-                  <Sun className="w-3 h-3" />
-                  Interface Theme
-                </h3>
-                <div className="flex gap-2">
-                  <button 
-                    onClick={() => setTheme('dark')}
-                    className={cn(
-                      "flex-1 py-3 rounded-xl text-xs font-bold uppercase tracking-widest transition-all border",
-                      theme === 'dark' ? "bg-white text-black border-white" : "bg-white/5 border-white/10 text-white/40"
-                    )}
-                  >
-                    Dark
-                  </button>
-                  <button 
-                    onClick={() => setTheme('light')}
-                    className={cn(
-                      "flex-1 py-3 rounded-xl text-xs font-bold uppercase tracking-widest transition-all border",
-                      theme === 'light' ? "bg-white text-black border-white" : "bg-white/5 border-white/10 text-white/40"
-                    )}
-                  >
-                    Light
                   </button>
                 </div>
               </section>

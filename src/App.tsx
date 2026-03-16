@@ -4,6 +4,7 @@
  */
 
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { jsPDF } from 'jspdf';
 import { GoogleGenAI, Type, GenerateContentResponse, ThinkingLevel } from "@google/genai";
 import { 
   AlertTriangle, 
@@ -16,11 +17,15 @@ import {
   ExternalLink,
   Shield,
   Search,
+  Plus,
+  Minus,
+  Maximize,
   MapPin,
   X,
   ChevronRight,
   Zap,
   Download,
+  Play,
   FilterX,
   ArrowUpDown,
   Flame,
@@ -43,7 +48,17 @@ import {
   TrendingUp,
   Orbit,
   Cpu,
-  Sun
+  Sun,
+  Heart,
+  Anchor,
+  Droplets,
+  BookOpen,
+  FileDown,
+  HeartPulse,
+  HandHelping,
+  Tent,
+  LifeBuoy,
+  ShieldQuestion
 } from 'lucide-react';
 import Header from './components/Header';
 import SettingsModal from './components/SettingsModal';
@@ -51,6 +66,8 @@ import HistoryModal from './components/HistoryModal';
 import AboutModal from './components/AboutModal';
 import CriticalAlertBanner from './components/CriticalAlertBanner';
 import DefconOneOverlay from './components/DefconOneOverlay';
+import { SolutionCard } from './components/SolutionCard';
+import { getSolutionsForEmergency, HUMANITARIAN_SOLUTIONS } from './humanitarianData';
 import { cn } from './utils';
 
 import Markdown from 'react-markdown';
@@ -97,6 +114,7 @@ interface Emergency {
 interface GlobalStatus {
   defcon_level: number;
   emergencies: Emergency[];
+  humanitarian_efforts: HumanitarianEffort[];
   stability_assessment: string;
   last_updated: string;
   presidential_interruption?: {
@@ -142,6 +160,21 @@ interface Briefing {
   source_url?: string;
 }
 
+interface HumanitarianEffort {
+  id: string;
+  title: string;
+  type: 'AID' | 'RESCUE' | 'RECONSTRUCTION' | 'MEDICAL' | 'SHELTER' | 'FOOD' | 'WATER';
+  status: 'ACTIVE' | 'COMPLETED' | 'PLANNED';
+  location: string;
+  coordinates: { lat: number; lng: number };
+  description: string;
+  organization: string;
+  timestamp: string;
+  source_url?: string;
+  official?: boolean;
+  country_code?: string;
+}
+
 interface Leader {
   id: string;
   name: string;
@@ -155,29 +188,41 @@ interface Leader {
   associated_crises: { title: string; url?: string }[];
 }
 
+// --- Constants & Helpers ---
+const ISO3_TO_ISO2: Record<string, string> = {
+  'brazil': 'br', 'afghanistan': 'af', 'china': 'cn', 'ethiopia': 'et', 'kenya': 'ke', 'angola': 'ao', 'south africa': 'za', 'ukraine': 'ua', 'sudan': 'sd', 'syria': 'sy', 'yemen': 'ye', 'gaza': 'ps', 'palestine': 'ps', 'israel': 'il', 'lebanon': 'lb', 'iran': 'ir', 'iraq': 'iq', 'libya': 'ly', 'mali': 'ml', 'niger': 'ne', 'chad': 'td', 'somalia': 'so', 'myanmar': 'mm', 'haiti': 'ht', 'venezuela': 've', 'colombia': 'co', 'mexico': 'mx', 'turkey': 'tr', 'turkiye': 'tr', 'pakistan': 'pk', 'india': 'in', 'bangladesh': 'bd', 'egypt': 'eg', 'nigeria': 'ng', 'congo': 'cd', 'drc': 'cd',
+  'afg': 'af', 'alb': 'al', 'dza': 'dz', 'asm': 'as', 'and': 'ad', 'ago': 'ao', 'aia': 'ai', 'ata': 'aq', 'atg': 'ag', 'arg': 'ar', 'arm': 'am', 'abw': 'aw', 'aus': 'au', 'aut': 'at', 'aze': 'az',
+  'bhs': 'bs', 'bhr': 'bh', 'bgd': 'bd', 'brb': 'bb', 'blr': 'by', 'bel': 'be', 'blz': 'bz', 'ben': 'bj', 'bmu': 'bm', 'btn': 'bt', 'bol': 'bo', 'bes': 'bq', 'bih': 'ba', 'bwa': 'bw', 'bvt': 'bv', 'bra': 'br', 'iot': 'io', 'brn': 'bn', 'bgr': 'bg', 'bfa': 'bf', 'bdi': 'bi',
+  'cpv': 'cv', 'khm': 'kh', 'cmr': 'cm', 'can': 'ca', 'cym': 'ky', 'caf': 'cf', 'tcd': 'td', 'chl': 'cl', 'chn': 'cn', 'cxr': 'cx', 'cck': 'cc', 'col': 'co', 'com': 'km', 'cog': 'cg', 'cod': 'cd', 'cok': 'ck', 'cri': 'cr', 'hrv': 'hr', 'cub': 'cu', 'cuw': 'cw', 'cyp': 'cy', 'cze': 'cz',
+  'dnk': 'dk', 'dji': 'dj', 'dma': 'dm', 'dom': 'do', 'ecu': 'ec', 'egy': 'eg', 'slv': 'sv', 'gnq': 'gq', 'eri': 'er', 'est': 'ee', 'eth': 'et', 'flk': 'fk', 'fro': 'fo', 'fji': 'fj', 'fin': 'fi', 'fra': 'fr', 'guf': 'gf', 'pyf': 'pf', 'atf': 'tf', 'gab': 'ga', 'gmb': 'gm', 'geo': 'ge', 'deu': 'de', 'gha': 'gh', 'gib': 'gi', 'grc': 'gr', 'grl': 'gl', 'grd': 'gd', 'glp': 'gp', 'gum': 'gu', 'gtm': 'gt', 'ggy': 'gg', 'gin': 'gn', 'gnb': 'gw', 'guy': 'gy', 'hti': 'ht', 'hmd': 'hm', 'vat': 'va', 'hnd': 'hn', 'hkg': 'hk', 'hun': 'hu', 'isl': 'is', 'ind': 'in', 'idn': 'id', 'irn': 'ir', 'irq': 'iq', 'irl': 'ie', 'imn': 'im', 'isr': 'il', 'ita': 'it', 'jam': 'jm', 'jpn': 'jp', 'jey': 'je', 'jor': 'jo', 'kaz': 'kz', 'ken': 'ke', 'kir': 'ki', 'prk': 'kp', 'kor': 'kr', 'kwt': 'kw', 'kgz': 'kg', 'lao': 'la', 'lva': 'lv', 'lbn': 'lb', 'lso': 'ls', 'lbr': 'lr', 'lby': 'ly', 'lie': 'li', 'ltu': 'lt', 'lux': 'lu', 'mac': 'mo', 'mkd': 'mk', 'mdg': 'mg', 'mwi': 'mw', 'mys': 'my', 'mdv': 'mv', 'mli': 'ml', 'mlt': 'mt', 'mhl': 'mh', 'mtq': 'mq', 'mrt': 'mr', 'mus': 'mu', 'myt': 'yt', 'mex': 'mx', 'fsm': 'fm', 'mda': 'md', 'mco': 'mc', 'mng': 'mn', 'mne': 'me', 'msr': 'ms', 'mar': 'ma', 'moz': 'mz', 'mmr': 'mm', 'nam': 'na', 'nru': 'nr', 'npl': 'np', 'nld': 'nl', 'ncl': 'nc', 'nzl': 'nz', 'nic': 'ni', 'ner': 'ne', 'nga': 'ng', 'niu': 'nu', 'nfk': 'nf', 'mnp': 'mp', 'nor': 'no', 'omn': 'om', 'pak': 'pk', 'plw': 'pw', 'pse': 'ps', 'pan': 'pa', 'png': 'pg', 'pry': 'py', 'per': 'pe', 'phl': 'ph', 'pcn': 'pn', 'pol': 'pl', 'prt': 'pt', 'pri': 'pr', 'qat': 'qa', 'reu': 're', 'rou': 'ro', 'rus': 'ru', 'rwa': 'rw', 'blm': 'bl', 'shn': 'sh', 'kna': 'kn', 'lca': 'lc', 'maf': 'mf', 'spm': 'pm', 'vct': 'vc', 'wsm': 'ws', 'smr': 'sm', 'stp': 'st', 'sau': 'sa', 'sen': 'sn', 'srb': 'rs', 'syc': 'sc', 'sle': 'sl', 'sgp': 'sg', 'sxm': 'sx', 'svk': 'sk', 'svn': 'si', 'slb': 'sb', 'som': 'so', 'zaf': 'za', 'sgs': 'gs', 'ssd': 'ss', 'esp': 'es', 'lka': 'lk', 'sdn': 'sd', 'sur': 'sr', 'sjm': 'sj', 'swz': 'sz', 'swe': 'se', 'che': 'ch', 'syr': 'sy', 'twn': 'tw', 'tjk': 'tj', 'tza': 'tz', 'tha': 'th', 'tls': 'tl', 'tgo': 'tg', 'tkl': 'tk', 'ton': 'to', 'tto': 'tt', 'tun': 'tn', 'tur': 'tr', 'tkm': 'tm', 'tca': 'tc', 'tuv': 'tv', 'uga': 'ug', 'ukr': 'ua', 'are': 'ae', 'gbr': 'gb', 'usa': 'us', 'umi': 'um', 'ury': 'uy', 'uzb': 'uz', 'vut': 'vu', 'ven': 've', 'vnm': 'vn', 'vgb': 'vg', 'vir': 'vi', 'wlf': 'wf', 'esh': 'eh', 'yem': 'ye', 'zmb': 'zm', 'zwe': 'zw'
+};
+
 const getCountryCode = (country: string): string => {
+  const normalized = country.toLowerCase();
+  if (ISO3_TO_ISO2[normalized]) return ISO3_TO_ISO2[normalized];
+  
   const mapping: Record<string, string> = {
-    'United States': 'us',
-    'USA': 'us',
-    'China': 'cn',
-    'Russia': 'ru',
-    'United Kingdom': 'gb',
-    'UK': 'gb',
-    'France': 'fr',
-    'Germany': 'de',
-    'Israel': 'il',
-    'Iran': 'ir',
-    'North Korea': 'kp',
-    'South Korea': 'kr',
-    'Ukraine': 'ua',
-    'Japan': 'jp',
-    'India': 'in',
-    'Brazil': 'br',
-    'Canada': 'ca',
-    'Australia': 'au',
-    'NATO': 'un',
+    'united states': 'us',
+    'usa': 'us',
+    'china': 'cn',
+    'russia': 'ru',
+    'united kingdom': 'gb',
+    'uk': 'gb',
+    'france': 'fr',
+    'germany': 'de',
+    'israel': 'il',
+    'iran': 'ir',
+    'north korea': 'kp',
+    'south korea': 'kr',
+    'ukraine': 'ua',
+    'japan': 'jp',
+    'india': 'in',
+    'brazil': 'br',
+    'canada': 'ca',
+    'australia': 'au',
+    'nato': 'un',
   };
-  return mapping[country] || 'un';
+  return mapping[normalized] || 'un';
 };
 
 const DEFCON_COLORS: Record<number, string> = {
@@ -210,6 +255,22 @@ const DEFCON_DEFINITIONS: Record<number, string> = {
   3: 'Heightened state of alert. Strategic forces are mobilized and ready for rapid deployment.',
   4: 'Increased intelligence gathering and security. Precautionary measures are in place.',
   5: 'Standard peacetime readiness. No immediate military threat detected.',
+};
+
+const RESILIENCE_LEVELS: Record<number, string> = {
+  1: "Global Unity. Humanitarian efforts are fully synchronized. Maximum resilience achieved.",
+  2: "High Cooperation. Major aid corridors are open and protected. Strong community bonds.",
+  3: "Active Response. Relief efforts are mobilized. Local networks are stabilizing.",
+  4: "Emerging Hope. Initial aid reaching affected zones. Awareness is growing.",
+  5: "Baseline Resilience. Standard humanitarian protocols in place. Monitoring for needs."
+};
+
+const RESILIENCE_COLORS: Record<number, string> = {
+  1: "from-emerald-600 to-teal-600 shadow-[0_0_40px_rgba(16,185,129,0.4)]",
+  2: "from-emerald-500 to-emerald-600 shadow-[0_0_30px_rgba(16,185,129,0.3)]",
+  3: "from-teal-500 to-emerald-500 shadow-[0_0_20px_rgba(20,184,166,0.2)]",
+  4: "from-lime-500 to-emerald-500 shadow-[0_0_15px_rgba(132,204,22,0.15)]",
+  5: "from-emerald-400/20 to-emerald-500/20 shadow-none border border-emerald-500/20"
 };
 
 const safeUrl = (url: any): string | null => {
@@ -260,7 +321,7 @@ const safeJsonParse = (text: any, fallback: any) => {
       // Final attempt to parse
       return JSON.parse(cleaned);
     } catch (innerError) {
-      console.warn("Sentinel: JSON Parse Recovery Failed", {
+      console.warn("Sovereign-Resilience: JSON Parse Recovery Failed", {
         error: innerError,
         snippet: text.substring(0, 100) + "..."
       });
@@ -522,8 +583,880 @@ const WorldMap = React.forwardRef<WorldMapHandle, { emergencies: Emergency[], on
   );
 });
 
+// --- Dashboard Toggle Component ---
+const DashboardToggle = ({ mode, setMode, showHeader }: { mode: 'THREAT' | 'RESILIENCE', setMode: (m: 'THREAT' | 'RESILIENCE') => void, showHeader: boolean }) => {
+  return (
+    <div className={cn(
+      "sticky z-[40] flex justify-center py-4 backdrop-blur-md border-b border-white/5 print:hidden transition-all duration-300",
+      mode === 'THREAT' ? "bg-black/40" : "bg-[#020804]/60",
+      showHeader ? "top-[57px]" : "top-0"
+    )}>
+      <div className="relative flex items-center bg-[#121214] border border-white/10 rounded-full p-1 shadow-2xl">
+        <motion.div
+          className="absolute inset-1 rounded-full"
+          initial={false}
+          animate={{
+            x: mode === 'THREAT' ? 0 : '100%',
+            backgroundColor: mode === 'THREAT' ? 'rgba(220, 38, 38, 0.1)' : 'rgba(16, 185, 129, 0.1)'
+          }}
+          transition={{ type: "spring", stiffness: 300, damping: 30 }}
+          style={{ width: 'calc(50% - 4px)' }}
+        />
+        <button
+          onClick={() => setMode('THREAT')}
+          className={cn(
+            "relative px-6 py-2 rounded-full text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2",
+            mode === 'THREAT' ? "text-red-500" : "text-white/40 hover:text-white/60"
+          )}
+        >
+          <span className={cn("w-2 h-2 rounded-full bg-red-500", mode === 'THREAT' && "animate-pulse")} />
+          🔴 Global Threat Monitor
+        </button>
+        <button
+          onClick={() => setMode('RESILIENCE')}
+          className={cn(
+            "relative px-6 py-2 rounded-full text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2",
+            mode === 'RESILIENCE' ? "text-emerald-500" : "text-white/40 hover:text-white/60"
+          )}
+        >
+          <span className={cn("w-2 h-2 rounded-full bg-emerald-500", mode === 'RESILIENCE' && "animate-pulse")} />
+          🌿 Humanitarian Resilience
+        </button>
+      </div>
+    </div>
+  );
+};
+
+// --- Humanitarian Map Component ---
+const HumanitarianMap = ({ efforts }: { efforts: HumanitarianEffort[] }) => {
+  const svgRef = useRef<SVGSVGElement>(null);
+  const tooltipRef = useRef<HTMLDivElement>(null);
+  const [worldData, setWorldData] = useState<any>(null);
+
+  useEffect(() => {
+    fetch('https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json')
+      .then(res => res.json())
+      .then(data => {
+        setWorldData(feature(data, data.objects.countries));
+      });
+  }, []);
+
+  useEffect(() => {
+    if (!worldData || !svgRef.current) return;
+
+    const svg = d3.select(svgRef.current);
+    const width = svgRef.current.clientWidth;
+    const height = svgRef.current.clientHeight;
+    const tooltip = d3.select(tooltipRef.current);
+
+    svg.selectAll("*").remove();
+
+    const g = svg.append("g");
+
+    const projection = d3.geoMercator()
+      .scale(width / 6.5)
+      .translate([width / 2, height / 1.5]);
+    
+    const path = d3.geoPath().projection(projection);
+
+    const zoom = d3.zoom<SVGSVGElement, unknown>()
+      .scaleExtent([1, 8])
+      .on("zoom", (event) => {
+        g.attr("transform", event.transform);
+      });
+    
+    svg.call(zoom);
+
+    // Add zoom controls
+    const zoomIn = () => svg.transition().call(zoom.scaleBy, 1.5);
+    const zoomOut = () => svg.transition().call(zoom.scaleBy, 0.7);
+    const resetZoom = () => svg.transition().call(zoom.transform, d3.zoomIdentity);
+
+    (window as any).mapZoomIn = zoomIn;
+    (window as any).mapZoomOut = zoomOut;
+    (window as any).mapResetZoom = resetZoom;
+
+    // Draw countries with earthy tones
+    g.append("g")
+      .selectAll("path")
+      .data(worldData.features)
+      .enter()
+      .append("path")
+      .attr("d", path as any)
+      .attr("fill", "#1B261D")
+      .attr("stroke", "#2D3A2F")
+      .attr("stroke-width", 0.5);
+
+    // Draw efforts
+    const markers = g.append("g");
+
+    efforts.forEach(effort => {
+      const [x, y] = projection([effort.coordinates.lng, effort.coordinates.lat]) || [0, 0];
+      
+      const color = 
+        effort.type === 'MEDICAL' ? "#10B981" : // Emerald
+        effort.type === 'WATER' ? "#06B6D4" : // Cyan
+        effort.type === 'FOOD' ? "#F59E0B" : // Amber
+        effort.type === 'RESCUE' ? "#F43F5E" : // Rose
+        "#8B5CF6"; // Violet
+
+      const markerGroup = markers.append("g")
+        .attr("class", "cursor-pointer")
+        .on("mouseover", (event) => {
+          tooltip.style("opacity", 1);
+          tooltip.html(`
+            <div class="p-3 bg-[#020804]/90 backdrop-blur-xl border border-emerald-500/20 rounded-xl shadow-2xl min-w-[200px]">
+              <div class="flex items-center justify-between gap-4 mb-2 border-b border-emerald-500/10 pb-2">
+                <span class="text-[8px] font-mono font-black px-1.5 py-0.5 rounded border" style="background: ${color}20; color: ${color}; border-color: ${color}40">
+                  ${effort.type}
+                </span>
+                <span class="text-[8px] font-mono text-emerald-500/40 uppercase tracking-widest">${effort.status}</span>
+              </div>
+              <p class="font-bold text-[11px] text-white leading-tight mb-1">${effort.title}</p>
+              <p class="text-[9px] text-emerald-500/60 mb-2">${effort.organization}</p>
+              <div class="flex items-center gap-1.5 text-[9px] text-white/50">
+                <MapPin class="w-2.5 h-2.5" />
+                ${effort.location}
+              </div>
+            </div>
+          `);
+        })
+        .on("mousemove", (event) => {
+          tooltip
+            .style("left", (event.pageX + 15) + "px")
+            .style("top", (event.pageY - 15) + "px");
+        })
+        .on("mouseout", () => {
+          tooltip.style("opacity", 0);
+        });
+
+      markerGroup.append("circle")
+        .attr("cx", x)
+        .attr("cy", y)
+        .attr("r", 6)
+        .attr("fill", color)
+        .attr("opacity", 0.4)
+        .append("animate")
+        .attr("attributeName", "r")
+        .attr("values", "6;14;6")
+        .attr("dur", "3s")
+        .attr("repeatCount", "indefinite");
+
+      markerGroup.append("circle")
+        .attr("cx", x)
+        .attr("cy", y)
+        .attr("r", 4)
+        .attr("fill", color)
+        .attr("stroke", "white")
+        .attr("stroke-width", 1);
+    });
+
+  }, [worldData, efforts]);
+
+  return (
+    <div className="relative w-full h-[400px] bg-[#020804]/40 rounded-[2rem] overflow-hidden border border-emerald-500/10">
+      <svg ref={svgRef} className="w-full h-full touch-none" />
+      <div 
+        ref={tooltipRef} 
+        className="fixed pointer-events-none opacity-0 transition-opacity z-[100]"
+      />
+      <div className="absolute top-6 right-6 flex flex-col gap-2">
+        <button 
+          onClick={() => (window as any).mapZoomIn?.()}
+          className="w-10 h-10 rounded-xl bg-[#020804]/80 backdrop-blur-md border border-emerald-500/20 flex items-center justify-center text-emerald-500 hover:bg-emerald-500/10 transition-all shadow-xl"
+        >
+          <Plus className="w-5 h-5" />
+        </button>
+        <button 
+          onClick={() => (window as any).mapZoomOut?.()}
+          className="w-10 h-10 rounded-xl bg-[#020804]/80 backdrop-blur-md border border-emerald-500/20 flex items-center justify-center text-emerald-500 hover:bg-emerald-500/10 transition-all shadow-xl"
+        >
+          <Minus className="w-5 h-5" />
+        </button>
+        <button 
+          onClick={() => (window as any).mapResetZoom?.()}
+          className="w-10 h-10 rounded-xl bg-[#020804]/80 backdrop-blur-md border border-emerald-500/20 flex items-center justify-center text-emerald-500 hover:bg-emerald-500/10 transition-all shadow-xl"
+        >
+          <Maximize className="w-5 h-5" />
+        </button>
+      </div>
+      <div className="absolute top-6 left-6">
+        <div className="flex items-center gap-2 px-3 py-1.5 bg-emerald-500/10 border border-emerald-500/20 rounded-full">
+          <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+          <span className="text-[9px] font-black text-emerald-500 uppercase tracking-widest">Active Resilience Map</span>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// --- Global State & Types ---
+
+const getFlagUrl = (code?: string) => {
+  if (!code) return null;
+  const normalized = code.toLowerCase();
+  const iso2 = ISO3_TO_ISO2[normalized] || (normalized.length === 2 ? normalized : null);
+  if (!iso2) return null;
+  return `https://flagcdn.com/w160/${iso2}.png`;
+};
+
+// --- Aid Organization Data ---
+const AID_ORGANIZATIONS = [
+  { name: 'ICRC', status: 'OPERATIONAL', focus: 'Conflict Zones', region: 'Global' },
+  { name: 'WFP', status: 'ACTIVE', focus: 'Food Security', region: 'Global' },
+  { name: 'MSF', status: 'CRITICAL', focus: 'Medical Emergency', region: 'Global' },
+  { name: 'UNHCR', status: 'ACTIVE', focus: 'Refugee Support', region: 'Global' },
+  { name: 'Red Cross', status: 'OPERATIONAL', focus: 'Disaster Relief', region: 'Global' },
+];
+
+// --- Resilience Dashboard Component ---
+const ResilienceDashboard = ({ status }: { status: GlobalStatus | null }) => {
+  // Derive resilience level inversely from DEFCON for symmetry, or keep it positive
+  const resilienceLevel = status ? (6 - status.defcon_level) : 5;
+  const [knowledgeIndex, setKnowledgeIndex] = useState(0);
+  const [feedFilter, setFeedFilter] = useState<string | null>(null);
+  const [enrichingId, setEnrichingId] = useState<string | null>(null);
+  const [enrichedArticles, setEnrichedArticles] = useState<Record<string, string>>({});
+
+  const findOfficialArticle = async (effort: HumanitarianEffort) => {
+    setEnrichingId(effort.id);
+    try {
+      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
+      const response = await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: `Find the most official news article or report for this event: "${effort.title}" in ${effort.location}. Return ONLY the URL of the most official source (e.g. Reuters, AP, UN, BBC, or official government site).`,
+        config: {
+          tools: [{ googleSearch: {} }]
+        }
+      });
+      
+      const url = response.text?.match(/https?:\/\/[^\s]+/)?.[0];
+      if (url) {
+        setEnrichedArticles(prev => ({ ...prev, [effort.id]: url }));
+      }
+    } catch (err) {
+      console.error("Failed to find official article:", err);
+    } finally {
+      setEnrichingId(null);
+    }
+  };
+
+  /* 
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setKnowledgeIndex(prev => (prev + 1) % HUMANITARIAN_SOLUTIONS.length);
+    }, 8000);
+    return () => clearInterval(interval);
+  }, []);
+  */
+
+  const filteredEfforts = status?.humanitarian_efforts?.filter(e => !feedFilter || e.type === feedFilter) || [];
+  const ALL_TOPICS = ['AID', 'RESCUE', 'RECONSTRUCTION', 'MEDICAL', 'SHELTER', 'FOOD', 'WATER'];
+
+  return (
+    <motion.div 
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      transition={{ duration: 0.5 }}
+    >
+            {/* Humanitarian Watchlist (Symmetry with Leader Watchlist) */}
+      <div className="bg-[#020804]/40 border-b border-emerald-500/5 py-4 overflow-x-auto custom-scrollbar">
+        <div className="max-w-7xl mx-auto px-4 flex items-center gap-6">
+          <div className="shrink-0 flex flex-col">
+            <span className="text-[8px] font-mono text-emerald-500/30 uppercase tracking-[0.3em] mb-1">Humanitarian</span>
+            <span className="text-[10px] font-bold text-emerald-500/80 uppercase tracking-widest">Relief Watch</span>
+          </div>
+          <div className="h-10 w-[1px] bg-emerald-500/10 shrink-0" />
+          <div className="flex items-center gap-8 pr-4">
+            {(status?.humanitarian_efforts || []).slice(0, 10).map((effort) => {
+              const flagUrl = getFlagUrl(effort.country_code);
+              return (
+                <div key={effort.id} className="flex items-center gap-3 group transition-all">
+                  <div className="relative w-12 h-12 shrink-0">
+                    {/* Heart Shape SVG for Clipping and Background */}
+                    <svg width="0" height="0" className="absolute">
+                      <defs>
+                        <clipPath id="heartClipTop" clipPathUnits="objectBoundingBox">
+                          <path d="M.5,1 C.5,1 0,.7 .05,.35 C.05,.15 .25,0 .5,.25 C.75,0 .95,.15 .95,.35 C1,.7 .5,1 .5,1" />
+                        </clipPath>
+                      </defs>
+                    </svg>
+                    
+                    <div className={cn(
+                      "absolute inset-0 w-full h-full transition-colors duration-500",
+                      effort.type === 'MEDICAL' ? "bg-emerald-500/20" :
+                      effort.type === 'WATER' ? "bg-cyan-500/20" :
+                      effort.type === 'FOOD' ? "bg-amber-500/20" :
+                      effort.type === 'RESCUE' ? "bg-rose-500/20" :
+                      effort.type === 'SHELTER' ? "bg-indigo-500/20" :
+                      "bg-amber-500/20"
+                    )} style={{ clipPath: 'url(#heartClipTop)' }} />
+                    
+                    <div 
+                      className="absolute inset-0 flex items-center justify-center overflow-hidden"
+                      style={{ clipPath: 'url(#heartClipTop)' }}
+                    >
+                      {flagUrl ? (
+                        <img 
+                          src={flagUrl} 
+                          alt={effort.location}
+                          className="w-full h-full object-cover scale-110 group-hover:scale-125 transition-transform duration-700"
+                          referrerPolicy="no-referrer"
+                        />
+                      ) : (
+                        <div className={cn(
+                          "w-full h-full flex items-center justify-center",
+                          effort.type === 'MEDICAL' ? "text-emerald-500" :
+                          effort.type === 'WATER' ? "text-cyan-500" :
+                          effort.type === 'FOOD' ? "text-amber-500" :
+                          effort.type === 'RESCUE' ? "text-rose-500" :
+                          effort.type === 'SHELTER' ? "text-indigo-500" :
+                          "text-amber-500"
+                        )}>
+                          {effort.type === 'MEDICAL' && <HeartPulse className="w-5 h-5" />}
+                          {effort.type === 'WATER' && <Droplets className="w-5 h-5" />}
+                          {effort.type === 'FOOD' && <Flame className="w-5 h-5" />}
+                          {effort.type === 'RESCUE' && <LifeBuoy className="w-5 h-5" />}
+                          {effort.type === 'SHELTER' && <Tent className="w-5 h-5" />}
+                          {effort.type === 'AID' && <HandHelping className="w-5 h-5" />}
+                          {!['MEDICAL', 'WATER', 'FOOD', 'RESCUE', 'SHELTER', 'AID'].includes(effort.type) && <Heart className="w-5 h-5" />}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  <div className="text-left">
+                    <p className="text-[10px] font-bold text-emerald-500/90 leading-none mb-1 truncate max-w-[100px]">{effort.organization}</p>
+                    <p className="text-[8px] font-mono text-amber-500 uppercase tracking-widest truncate max-w-[100px] font-black">{effort.location}</p>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+
+      <main className="max-w-7xl mx-auto px-4 py-8">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+          {/* Left Column: Intelligence and Knowledge */}
+          <div className="lg:col-span-4 order-1 lg:order-none space-y-8">
+            {/* Resilience Metrics (Symmetry with Leader Watchlist) */}
+            <section className="space-y-6">
+              <div className="p-8 rounded-[2.5rem] bg-amber-500/10 border border-amber-500/20 shadow-xl shadow-amber-900/10">
+                <div className="flex items-center gap-3 mb-6">
+                  <Activity className="w-5 h-5 text-amber-500" />
+                  <h3 className="text-xs font-black text-amber-500 uppercase tracking-[0.3em]">Resilience Metrics</h3>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  {[
+                    { label: 'Active Efforts', value: status?.humanitarian_efforts?.length || 0 },
+                    { label: 'Official Sources', value: new Set(status?.humanitarian_efforts?.map(e => e.organization)).size || 0 },
+                  ].map(({ label, value }) => (
+                    <div key={label} className="p-4 rounded-2xl bg-white/[0.02] border border-white/5 hover:bg-amber-500/5 transition-colors">
+                      <div className="text-2xl font-black tabular-nums text-amber-500">{value}</div>
+                      <div className="text-[8px] font-mono opacity-40 uppercase tracking-widest mt-1">{label}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </section>
+
+            {/* Resilience Level Card (Symmetry with DEFCON) */}
+            <section className="relative group">
+              <div className={cn(
+                "absolute -inset-1 rounded-[2.5rem] blur-2xl transition-all duration-1000 opacity-20 bg-amber-500/20"
+              )} />
+              
+              <div className="relative bg-[#020804] border border-amber-500/10 rounded-[2rem] overflow-hidden shadow-2xl shadow-amber-900/20">
+                <div className="p-6 flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Heart className="w-4 h-4 text-amber-500/40" />
+                    <h2 className="text-[10px] font-mono font-bold text-amber-500/40 uppercase tracking-[0.2em]">Humanitarian Readiness</h2>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <div className="w-1 h-1 rounded-full bg-amber-500 animate-pulse" />
+                    <span className="text-[9px] font-mono text-amber-500/80 uppercase">Active</span>
+                  </div>
+                </div>
+
+                <div className="px-8 pb-10 flex flex-col items-center text-center">
+                  <div className="relative mb-8">
+                    <div className="absolute inset-0 rounded-full border border-amber-500/5 scale-150" />
+                    <div className="absolute inset-0 rounded-full border border-amber-500/5 scale-125" />
+                    
+                    <motion.div 
+                      animate={{ 
+                        scale: [1, 1.05, 1],
+                        boxShadow: ["0 0 20px rgba(245,158,11,0.2)", "0 0 40px rgba(245,158,11,0.4)", "0 0 20px rgba(245,158,11,0.2)"]
+                      }}
+                      transition={{
+                        duration: 4,
+                        repeat: Infinity,
+                        ease: "easeInOut"
+                      }}
+                      className={cn(
+                        "w-40 h-40 rounded-full flex flex-col items-center justify-center bg-gradient-to-br transition-all duration-700 relative z-10",
+                        RESILIENCE_COLORS[resilienceLevel]
+                      )}
+                    >
+                      <span className="text-[10px] font-mono font-bold tracking-[0.3em] opacity-60 mb-1 uppercase">Level</span>
+                      <span className="text-7xl font-black tracking-tighter tabular-nums text-white">
+                        {resilienceLevel}
+                      </span>
+                    </motion.div>
+                  </div>
+
+                  <div className="space-y-4 w-full">
+                    <div className="p-4 rounded-2xl bg-amber-500/5 border border-amber-500/10">
+                      <p className="text-[10px] font-mono text-amber-500/40 uppercase tracking-widest mb-1 text-left">Resilience Status</p>
+                      <p className="text-xs font-bold text-white text-left leading-relaxed">
+                        {RESILIENCE_LEVELS[resilienceLevel]}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="bg-amber-500/[0.02] p-6 border-t border-amber-500/5">
+                  <div className="flex justify-between text-[9px] font-mono text-amber-500/30 mb-4 tracking-widest">
+                    <span>RESILIENCE SCALE</span>
+                    <span>LEVEL {resilienceLevel}</span>
+                  </div>
+                  <div className="flex gap-2 h-1.5">
+                    {[1, 2, 3, 4, 5].map((level) => (
+                      <div 
+                        key={level}
+                        className={cn(
+                          "flex-1 rounded-full transition-all duration-500",
+                          resilienceLevel === level ? "opacity-100" : "opacity-10",
+                          "bg-amber-500"
+                        )}
+                      />
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            {/* Active Countermeasures (Direct response to emergencies) */}
+            {status?.emergencies && status.emergencies.length > 0 && (
+              <div className="p-8 rounded-[2.5rem] bg-emerald-500/10 border border-emerald-500/20 shadow-xl">
+                <div className="flex items-center gap-3 mb-6">
+                  <ShieldCheck className="w-5 h-5 text-emerald-500" />
+                  <h3 className="text-xs font-black text-emerald-500 uppercase tracking-[0.3em]">Active Countermeasures</h3>
+                </div>
+                <div className="space-y-4">
+                  {status.emergencies.slice(0, 2).map((emergency) => {
+                    const solutions = getSolutionsForEmergency(emergency);
+                    return (
+                      <div key={emergency.id} className="p-4 rounded-2xl bg-white/[0.02] border border-white/5">
+                        <div className="flex items-center justify-between mb-3">
+                          <span className="text-[9px] font-mono text-white/40 uppercase tracking-widest truncate max-w-[150px]">Target: {emergency.title}</span>
+                          <span className="text-[9px] font-bold text-emerald-500 uppercase tracking-widest">Solution Sync</span>
+                        </div>
+                        <div className="space-y-2">
+                          {solutions.map(s => (
+                            <div key={s.id} className="flex items-center gap-3 p-2 rounded-xl bg-emerald-500/5 border border-emerald-500/10">
+                              <CheckCircle2 className="w-3 h-3 text-emerald-500" />
+                              <span className="text-[9px] font-bold text-white uppercase tracking-widest">{s.title}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Global Aid Coordination */}
+            <div className="p-8 rounded-[2.5rem] bg-[#020804] border border-amber-500/10 shadow-xl shadow-amber-900/10">
+              <div className="flex items-center gap-3 mb-6">
+                <HandHelping className="w-5 h-5 text-amber-500" />
+                <h3 className="text-xs font-black text-amber-500 uppercase tracking-[0.3em]">Global Aid Coordination</h3>
+              </div>
+              <div className="space-y-3">
+                {AID_ORGANIZATIONS.map((org) => (
+                  <div key={org.name} className="flex items-center justify-between p-3 rounded-xl bg-white/[0.02] border border-white/5">
+                    <div>
+                      <div className="text-[10px] font-black text-white uppercase tracking-widest">{org.name}</div>
+                      <div className="text-[8px] text-white/40 uppercase tracking-tighter">{org.focus}</div>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <div className="text-right">
+                        <div className={cn(
+                          "text-[8px] font-bold uppercase tracking-widest",
+                          org.status === 'CRITICAL' ? "text-rose-500" : "text-emerald-500"
+                        )}>
+                          {org.status}
+                        </div>
+                        <div className="text-[7px] text-white/20 uppercase">{org.region}</div>
+                      </div>
+                      <div className={cn(
+                        "w-1.5 h-1.5 rounded-full",
+                        org.status === 'CRITICAL' ? "bg-rose-500 animate-pulse" : "bg-emerald-500"
+                      )} />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="p-8 rounded-[2.5rem] bg-[#020804] border border-amber-500/10 shadow-xl shadow-amber-900/10 flex flex-col">
+              <div className="flex items-center justify-between mb-6">
+                <div className="flex items-center gap-3">
+                  <BookOpen className="w-5 h-5 text-amber-500" />
+                  <h3 className="text-xs font-black text-amber-500 uppercase tracking-[0.3em]">Resilience Knowledge</h3>
+                </div>
+                <div className="flex gap-1">
+                  {HUMANITARIAN_SOLUTIONS.map((_, i) => (
+                    <div 
+                      key={i} 
+                      className={cn(
+                        "w-1 h-1 rounded-full transition-all",
+                        i === knowledgeIndex ? "bg-amber-500 w-3" : "bg-white/10"
+                      )} 
+                    />
+                  ))}
+                </div>
+              </div>
+              <div className="relative min-h-[320px] sm:min-h-[280px] flex flex-col">
+                <AnimatePresence mode="wait">
+                  <motion.div
+                    key={knowledgeIndex}
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -10 }}
+                    className="flex-1"
+                  >
+                    <SolutionCard solution={HUMANITARIAN_SOLUTIONS[knowledgeIndex]} className="border-amber-500/20" />
+                  </motion.div>
+                </AnimatePresence>
+              </div>
+              <div className="mt-8 flex justify-between gap-4">
+                <button 
+                  onClick={() => setKnowledgeIndex(prev => (prev - 1 + HUMANITARIAN_SOLUTIONS.length) % HUMANITARIAN_SOLUTIONS.length)}
+                  className="flex-1 py-2 rounded-xl bg-white/5 border border-white/10 text-[10px] font-bold uppercase tracking-widest hover:bg-white/10 transition-all"
+                >
+                  Previous
+                </button>
+                <button 
+                  onClick={() => setKnowledgeIndex(prev => (prev + 1) % HUMANITARIAN_SOLUTIONS.length)}
+                  className="flex-1 py-2 rounded-xl bg-white/5 border border-white/10 text-[10px] font-bold uppercase tracking-widest hover:bg-white/10 transition-all"
+                >
+                  Next
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Right Column: Tactical Intelligence (Symmetry with Threat Dashboard) */}
+          <div className="lg:col-span-8 space-y-8 order-2 lg:order-none">
+            {/* Global Resilience Network (Map) */}
+            <section className="bg-[#020804] border border-amber-500/10 rounded-[2.5rem] p-8 overflow-hidden shadow-2xl shadow-amber-900/20">
+              <div className="flex items-center justify-between mb-8">
+                <div className="flex items-center gap-4">
+                  <div className="w-12 h-12 rounded-2xl bg-amber-500/10 flex items-center justify-center border border-amber-500/20">
+                    <Globe className="w-6 h-6 text-amber-500" />
+                  </div>
+                  <div>
+                    <h2 className="text-sm font-black text-amber-500 uppercase tracking-[0.2em]">Global Resilience Network</h2>
+                    <p className="text-[10px] text-amber-500/40 uppercase tracking-widest">Tracking active humanitarian efforts</p>
+                  </div>
+                </div>
+              </div>
+              <HumanitarianMap efforts={status?.humanitarian_efforts || []} />
+            </section>
+
+            {/* Live Relief Watch */}
+            <section className="bg-[#020804] border border-amber-500/10 rounded-[2.5rem] p-8 shadow-2xl shadow-amber-900/20">
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
+                <div className="flex items-center gap-4">
+                  <div className="w-12 h-12 rounded-2xl bg-amber-500/10 flex items-center justify-center border border-amber-500/20">
+                    <Activity className="w-6 h-6 text-amber-500" />
+                  </div>
+                  <div>
+                    <h2 className="text-sm font-black text-amber-500 uppercase tracking-[0.2em]">Live Relief Watch</h2>
+                    <p className="text-[10px] text-amber-500/40 uppercase tracking-widest">Real-time aid & resilience tracking</p>
+                  </div>
+                </div>
+                
+                <div className="flex flex-wrap gap-2">
+                  <button 
+                    onClick={() => setFeedFilter(null)}
+                    className={cn(
+                      "px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all border",
+                      !feedFilter ? "bg-amber-500 border-amber-500 text-black" : "bg-white/5 border-white/10 text-white/40 hover:text-white"
+                    )}
+                  >
+                    All
+                  </button>
+                  {ALL_TOPICS.map(type => (
+                    <button 
+                      key={type}
+                      onClick={() => setFeedFilter(type)}
+                      className={cn(
+                        "px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all border",
+                        feedFilter === type ? "bg-amber-500 border-amber-500 text-black" : "bg-white/5 border-white/10 text-white/40 hover:text-white"
+                      )}
+                    >
+                      {type}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                {filteredEfforts.map((effort) => (
+                  <article 
+                    key={effort.id}
+                    className="group relative p-6 rounded-3xl bg-white/[0.02] border border-white/5 hover:border-amber-500/30 hover:bg-amber-500/[0.02] transition-all cursor-default overflow-hidden"
+                  >
+                    {/* Vertical Type Indicator Bar */}
+                    <div className={cn(
+                      "absolute left-0 top-0 bottom-0 w-1",
+                      effort.type === 'MEDICAL' ? "bg-emerald-500" :
+                      effort.type === 'WATER' ? "bg-cyan-500" :
+                      effort.type === 'FOOD' ? "bg-amber-500" :
+                      effort.type === 'RESCUE' ? "bg-rose-500" :
+                      effort.type === 'SHELTER' ? "bg-indigo-500" :
+                      "bg-amber-500"
+                    )} />
+
+                    <div className="flex flex-col gap-5">
+                      {/* Top Metadata Row */}
+                      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                        <div className="flex flex-wrap items-center gap-3">
+                          <div className={cn(
+                            "flex items-center gap-2 px-2 py-1 rounded-lg border text-[9px] font-black uppercase tracking-widest",
+                            effort.type === 'MEDICAL' ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-500" :
+                            effort.type === 'WATER' ? "bg-cyan-500/10 border-cyan-500/20 text-cyan-500" :
+                            effort.type === 'FOOD' ? "bg-amber-500/10 border-amber-500/20 text-amber-500" :
+                            effort.type === 'RESCUE' ? "bg-rose-500/10 border-rose-500/20 text-rose-500" :
+                            effort.type === 'SHELTER' ? "bg-indigo-500/10 border-indigo-500/20 text-indigo-500" :
+                            "bg-amber-500/10 border-amber-500/20 text-amber-500"
+                          )}>
+                            {effort.type === 'MEDICAL' && <HeartPulse className="w-3 h-3" />}
+                            {effort.type === 'WATER' && <Droplets className="w-3 h-3" />}
+                            {effort.type === 'FOOD' && <Flame className="w-3 h-3" />}
+                            {effort.type === 'RESCUE' && <LifeBuoy className="w-3 h-3" />}
+                            {effort.type === 'RECONSTRUCTION' && <Briefcase className="w-3 h-3" />}
+                            {effort.type === 'SHELTER' && <Tent className="w-3 h-3" />}
+                            {effort.type === 'AID' && <HandHelping className="w-3 h-3" />}
+                            {!['MEDICAL', 'WATER', 'FOOD', 'RESCUE', 'RECONSTRUCTION', 'SHELTER', 'AID'].includes(effort.type) && <Heart className="w-3 h-3" />}
+                            {effort.type}
+                          </div>
+                          
+                          <div className="flex items-center gap-2 text-[10px] font-mono text-amber-500 uppercase tracking-widest font-black">
+                            <MapPin className="w-3 h-3" />
+                            {effort.location}
+                          </div>
+
+                          <div className="text-[10px] font-mono text-white/30 uppercase tracking-widest">
+                            {format(new Date(effort.timestamp), 'HH:mm')} ZULU
+                          </div>
+                        </div>
+
+                        {effort.official && (
+                          <div className="px-2 py-1 bg-amber-500/10 border border-amber-500/20 rounded-lg text-[8px] font-black text-amber-500 uppercase tracking-widest shrink-0 w-fit">
+                            Official Deployment
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Title and Description Section */}
+                      <div className="space-y-4">
+                        <h3 className="text-xl font-bold text-white group-hover:text-amber-400 transition-colors leading-tight">
+                          {effort.title}
+                        </h3>
+
+                        <div className="p-5 rounded-2xl bg-amber-500/5 border border-amber-500/10 shadow-inner group-hover:bg-amber-500/[0.08] transition-colors">
+                          <div className="flex items-center gap-2 mb-3">
+                            <AlertTriangle className="w-3 h-3 text-amber-500" />
+                            <span className="text-[10px] font-black text-amber-500 uppercase tracking-[0.2em] block">Reason for Listing</span>
+                          </div>
+                          <p className="text-sm text-white/90 leading-relaxed font-medium whitespace-pre-wrap">
+                            {effort.description}
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Footer Actions Row */}
+                      <div className="flex flex-wrap items-center justify-between gap-4 pt-2 border-t border-white/5">
+                        <div className="flex items-center gap-2 text-[10px] font-mono text-white/40 uppercase tracking-widest">
+                          <Users className="w-3 h-3" />
+                          {effort.organization}
+                        </div>
+
+                        <div className="flex items-center gap-3">
+                          {!enrichedArticles[effort.id] && (
+                            <button
+                              onClick={() => findOfficialArticle(effort)}
+                              disabled={enrichingId === effort.id}
+                              className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-white/5 border border-white/10 text-[10px] font-bold text-white/40 hover:text-amber-500 hover:bg-amber-500/5 hover:border-amber-500/20 transition-all uppercase tracking-widest disabled:opacity-50"
+                            >
+                              {enrichingId === effort.id ? 'Searching...' : 'Find Coverage'} <Search className="w-3 h-3" />
+                            </button>
+                          )}
+                          
+                          {effort.source_url && (
+                            <a 
+                              href={safeUrl(enrichedArticles[effort.id] || effort.source_url)!} 
+                              target="_blank" 
+                              rel="noopener noreferrer"
+                              className="flex items-center gap-2 px-4 py-1.5 rounded-xl bg-amber-500/10 border border-amber-500/20 text-[10px] font-bold text-amber-500 hover:bg-amber-500/20 transition-all uppercase tracking-widest"
+                            >
+                              {enrichedArticles[effort.id] ? 'Official Article' : 'View Report'} <ExternalLink className="w-3 h-3" />
+                            </a>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </article>
+                ))}
+                {filteredEfforts.length === 0 && (
+                  <div className="p-12 text-center bg-white/[0.02] border border-white/5 rounded-3xl">
+                    <Activity className="w-12 h-12 text-white/5 mx-auto mb-4" />
+                    <p className="text-white/20 font-mono text-[10px] uppercase tracking-widest">No active resilience coverage detected for this topic.</p>
+                  </div>
+                )}
+              </div>
+            </section>
+          </div>
+        </div>
+
+        {/* Analog Resilience (Moved to bottom) */}
+        <section className="mt-12 p-10 rounded-[3rem] bg-amber-500/5 border border-amber-500/10 shadow-2xl relative overflow-hidden group">
+          <div className="absolute top-0 right-0 w-64 h-64 bg-amber-500/5 blur-[100px] -translate-y-1/2 translate-x-1/2" />
+          <div className="relative z-10 flex flex-col md:flex-row items-center justify-between gap-8">
+            <div className="max-w-xl">
+              <div className="flex items-center gap-3 mb-4">
+                <div className="w-12 h-12 rounded-2xl bg-amber-500/10 flex items-center justify-center border border-amber-500/20">
+                  <Download className="w-6 h-6 text-amber-500" />
+                </div>
+                <h3 className="text-xl font-black text-amber-500 uppercase tracking-[0.3em]">Analog Resilience Protocols</h3>
+              </div>
+              <p className="text-white/60 text-sm leading-relaxed">
+                In a grid-down scenario, digital tools fail. Download the complete offline manual for your physical emergency binder. 
+                Includes medical protocols, water purification guides, and local coordination maps.
+              </p>
+            </div>
+            <button 
+              onClick={() => {
+                try {
+                  const doc = new jsPDF();
+                  let yPos = 20;
+                  
+                  // Title
+                  doc.setFontSize(22);
+                  doc.setTextColor(180, 130, 0); // Amber
+                  doc.text('SOVEREIGN-RESILIENCE INTELLIGENCE MANUAL', 105, yPos, { align: 'center' });
+                  yPos += 10;
+                  
+                  doc.setFontSize(10);
+                  doc.setTextColor(100, 100, 100);
+                  doc.text(`Grid-Down Protocol v2.1 | Generated: ${new Date().toLocaleString()}`, 105, yPos, { align: 'center' });
+                  yPos += 15;
+                  
+                  // Dynamic Content from HUMANITARIAN_SOLUTIONS
+                  HUMANITARIAN_SOLUTIONS.forEach((solution, index) => {
+                    // Check if we need a new page
+                    if (yPos > 250) {
+                      doc.addPage();
+                      yPos = 20;
+                    }
+
+                    doc.setFontSize(14);
+                    doc.setTextColor(0, 0, 0);
+                    doc.setFont('helvetica', 'bold');
+                    doc.text(`${index + 1}. ${solution.title.toUpperCase()}`, 20, yPos);
+                    yPos += 7;
+
+                    doc.setFontSize(10);
+                    doc.setFont('helvetica', 'italic');
+                    doc.setTextColor(80, 80, 80);
+                    const descLines = doc.splitTextToSize(solution.description, 170);
+                    doc.text(descLines, 25, yPos);
+                    yPos += (descLines.length * 5) + 2;
+
+                    doc.setFont('helvetica', 'normal');
+                    doc.setTextColor(0, 0, 0);
+                    solution.steps.forEach((step) => {
+                      doc.text(`• ${step}`, 30, yPos);
+                      yPos += 5;
+                    });
+
+                    if (solution.sourceUrl) {
+                      doc.setTextColor(0, 0, 255);
+                      doc.setFontSize(8);
+                      doc.text(`Source: ${solution.sourceUrl}`, 30, yPos);
+                      // Add a clickable link over the text
+                      const textWidth = doc.getTextWidth(`Source: ${solution.sourceUrl}`);
+                      doc.link(30, yPos - 3, textWidth, 5, { url: solution.sourceUrl });
+                      yPos += 5;
+                    }
+                    
+                    yPos += 10; // Space between sections
+                  });
+
+                  // Liability Section
+                  if (yPos > 240) {
+                    doc.addPage();
+                    yPos = 20;
+                  } else {
+                    yPos = 260; // Push to bottom if space permits
+                  }
+
+                  doc.setDrawColor(200, 0, 0);
+                  doc.line(20, yPos - 5, 190, yPos - 5);
+                  
+                  doc.setFontSize(9);
+                  doc.setTextColor(200, 0, 0);
+                  doc.setFont('helvetica', 'bold');
+                  doc.text('LIABILITY & LEGAL DISCLAIMER', 105, yPos, { align: 'center' });
+                  yPos += 5;
+                  
+                  doc.setFontSize(7);
+                  doc.setFont('helvetica', 'normal');
+                  doc.setTextColor(100, 100, 100);
+                  const liabilityText = "This manual is provided for educational and informational purposes only. The techniques and protocols described herein are intended for emergency use when professional assistance is unavailable. The authors, contributors, and publishers of this manual assume no responsibility or liability for any injury, loss, or damage resulting from the use or misuse of the information provided. Users are advised to seek professional training in first aid, water purification, and emergency management. By downloading and using this manual, you acknowledge that you do so at your own risk and waive any claims against the creators of this platform.";
+                  const liabilityLines = doc.splitTextToSize(liabilityText, 170);
+                  doc.text(liabilityLines, 20, yPos);
+                  
+                  // Footer
+                  doc.setFontSize(8);
+                  doc.setTextColor(150, 150, 150);
+                  doc.text('Sovereign-Resilience Intelligence Network - "Stay Sovereign, Stay Resilient"', 105, 285, { align: 'center' });
+                  
+                  doc.save('Sovereign-Resilience-Manual.pdf');
+                } catch (err) {
+                  console.error('PDF Generation Error:', err);
+                }
+              }}
+              className="px-10 py-5 bg-amber-500 hover:bg-amber-400 text-black rounded-2xl text-xs font-black uppercase tracking-widest transition-all shadow-xl shadow-amber-900/40 hover:scale-[1.02] active:scale-95 flex items-center gap-3"
+            >
+              <FileDown className="w-5 h-5" />
+              Download Resilience Manual (.pdf)
+            </button>
+          </div>
+        </section>
+      </main>
+    </motion.div>
+  );
+};
+
 export default function App() {
-  const [status, setStatus] = useState<GlobalStatus | null>(null);
+  const [dashboardMode, setDashboardMode] = useState<'THREAT' | 'RESILIENCE'>('THREAT');
+  const [status, setStatus] = useState<GlobalStatus | null>(() => {
+    const saved = localStorage.getItem('sovereign_resilience_status');
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch (e) {
+        return null;
+      }
+    }
+    return null;
+  });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notificationsEnabled, setNotificationsEnabled] = useState(false);
@@ -534,6 +1467,13 @@ export default function App() {
   const [isBannerDismissed, setIsBannerDismissed] = useState(false);
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
   const [isPanicMode, setIsPanicMode] = useState(false);
+
+  // Persist status to localStorage
+  useEffect(() => {
+    if (status) {
+      localStorage.setItem('sovereign_resilience_status', JSON.stringify(status));
+    }
+  }, [status]);
 
   const togglePanicMode = useCallback(() => {
     setIsPanicMode(prev => !prev);
@@ -547,13 +1487,13 @@ export default function App() {
   const [showHeader, setShowHeader] = useState(true);
   const [lastScrollY, setLastScrollY] = useState(0);
   const [isLiveRecon, setIsLiveRecon] = useState(false);
+  const [runtimeConfig, setRuntimeConfig] = useState<{ GEMINI_API_KEY?: string }>({});
   const [seenIds, setSeenIds] = useState<Set<string>>(new Set());
   const [isAboutOpen, setIsAboutOpen] = useState(false);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isDefconInfoOpen, setIsDefconInfoOpen] = useState(false);
   const [isDefconOneOpen, setIsDefconOneOpen] = useState(false);
-  const [theme, setTheme] = useState<'dark' | 'light'>('dark');
 
   // Trigger DEFCON 1 Overlay
   useEffect(() => {
@@ -592,15 +1532,6 @@ export default function App() {
   const mapRef = useRef<WorldMapHandle>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
   const prevStatusRef = useRef<GlobalStatus | null>(null);
-
-  // Theme effect
-  useEffect(() => {
-    if (theme === 'light') {
-      document.documentElement.classList.add('light-theme');
-    } else {
-      document.documentElement.classList.remove('light-theme');
-    }
-  }, [theme]);
 
   // Scroll effect for header visibility
   useEffect(() => {
@@ -689,6 +1620,33 @@ export default function App() {
 
   // WebSocket Integration
   useEffect(() => {
+    // Fetch runtime config (API keys)
+    fetch('/api/config')
+      .then(res => res.json())
+      .then(config => {
+        console.log('DEBUG: Runtime config loaded', { ...config, GEMINI_API_KEY: config.GEMINI_API_KEY ? 'present' : 'missing' });
+        setRuntimeConfig(config);
+      })
+      .catch(err => console.error('Failed to fetch runtime config:', err));
+
+    // Backup fetch for initial data
+    fetch('/api/humanitarian')
+      .then(res => res.json())
+      .then(data => {
+        if (Array.isArray(data)) {
+          setStatus(prev => ({
+            ...prev,
+            defcon_level: prev?.defcon_level || 5,
+            emergencies: prev?.emergencies || [],
+            humanitarian_efforts: data,
+            stability_assessment: prev?.stability_assessment || 'STABLE',
+            last_updated: new Date().toISOString(),
+            source: 'Sovereign-Resilience Network'
+          } as GlobalStatus));
+        }
+      })
+      .catch(err => console.error('Backup fetch error:', err));
+
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const wsUrl = `${protocol}//${window.location.host}`;
     const ws = new WebSocket(wsUrl);
@@ -700,7 +1658,16 @@ export default function App() {
       try {
         const data = JSON.parse(event.data);
         if (data.type === 'CONNECTED') {
+          console.log('DEBUG: WebSocket CONNECTED, initialAnomalies:', data.initialAnomalies);
           if (data.initialAnomalies) setAnomalies(data.initialAnomalies);
+          setStatus(prev => ({
+            defcon_level: prev?.defcon_level || 5,
+            emergencies: data.initialAnomalies || [],
+            humanitarian_efforts: data.initialEfforts || [],
+            stability_assessment: prev?.stability_assessment || 'STABLE',
+            last_updated: new Date().toISOString(),
+            source: 'Sovereign-Resilience Network'
+          }));
         } else if (data.type === 'HEARTBEAT') {
           console.log('Real-time pulse received:', data.timestamp);
         } else if (data.type === 'ANOMALY_DETECTED') {
@@ -708,6 +1675,23 @@ export default function App() {
           if (data.anomaly.severity === 'CRITICAL' || data.anomaly.severity === 'HIGH') {
             playAlertSound();
           }
+        } else if (data.type === 'EFFORT_DETECTED') {
+          setStatus(prev => {
+            if (!prev) return null;
+            const existingIndex = prev.humanitarian_efforts.findIndex(e => e.id === data.effort.id);
+            let newEfforts;
+            if (existingIndex !== -1) {
+              newEfforts = [...prev.humanitarian_efforts];
+              newEfforts[existingIndex] = data.effort;
+            } else {
+              newEfforts = [data.effort, ...prev.humanitarian_efforts].slice(0, 50);
+            }
+            return {
+              ...prev,
+              humanitarian_efforts: newEfforts,
+              last_updated: new Date().toISOString()
+            };
+          });
         }
       } catch (e) {
         console.error('WS Message Error:', e);
@@ -719,21 +1703,63 @@ export default function App() {
 
 
 
+  // Keep ref in sync with status to avoid stale state in fetchStatus
+  useEffect(() => {
+    if (status) {
+      prevStatusRef.current = status;
+    }
+  }, [status]);
+
+  const isFetchingRef = useRef(false);
+
+  const addLog = useCallback((msg: string) => {
+    console.log(`[SYSTEM] ${msg}`);
+  }, []);
+
   const fetchStatus = useCallback(async (locationOverride?: string) => {
-    if (isPanicMode) return; // Freeze in panic mode
+    if (isPanicMode) return;
+    if (isFetchingRef.current) return;
+    
+    isFetchingRef.current = true;
+    setLoading(true);
+    setError(null);
+    addLog("Initiating global intelligence scan...");
 
     // Check for API key and prompt if not selected
     if (window.aistudio && !(await window.aistudio.hasSelectedApiKey())) {
+      addLog("Waiting for API key selection...");
       await window.aistudio.openSelectKey();
-      // Assume key selection was successful and proceed
     }
 
     const locationToSearch = locationOverride !== undefined ? locationOverride : searchLocation;
-    setLoading(true);
-    setError(null);
+    addLog(`Targeting: ${locationToSearch || 'Global'}`);
+
+    // Exponential backoff helper
+    const withRetry = async <T,>(fn: () => Promise<T>, retries = 3, delay = 2000): Promise<T> => {
+      try {
+        return await fn();
+      } catch (error: any) {
+        const isQuotaError = error.message?.includes('429') || 
+                            error.status === 429 || 
+                            error.message?.includes('RESOURCE_EXHAUSTED');
+        if (retries > 0 && isQuotaError) {
+          addLog(`Quota exceeded. Retrying in ${delay}ms...`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+          return withRetry(fn, retries - 1, delay * 2);
+        }
+        throw error;
+      }
+    };
+
     try {
-      // Create GoogleGenAI instance right before API call to ensure it uses the most up-to-date key
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
+      const apiKey = runtimeConfig.GEMINI_API_KEY || process.env.GEMINI_API_KEY;
+      
+      if (!apiKey) {
+        throw new Error("Gemini API Key is missing. Please select a key in the settings.");
+      }
+
+      addLog("Connecting to Gemini-3-Flash Intelligence...");
+      const ai = new GoogleGenAI({ apiKey });
       const userLanguage = navigator.language || 'en-US';
       
       const systemInstruction = `You are an expert intelligence analyst whose job is to translate complex geopolitical and crisis data for the general public. 
@@ -758,47 +1784,30 @@ export default function App() {
       - IMPORTANT: When asked for JSON output, ONLY output the raw JSON object. DO NOT include any thinking process, "thought" blocks, conversational text, or markdown formatting outside the JSON. Your response must be a valid JSON string that can be parsed by JSON.parse().
       - Rule: You must output your response ONLY as a valid JSON object. Do not include any markdown styling or extra text.`;
 
-      // Fetch Status
+      // Combined Prompt for all data
       const locationContext = locationToSearch ? ` specifically for the area: "${locationToSearch}"` : " globally";
-      const statusPrompt = `Search for current emergencies, major conflicts, natural disasters (including weather-related alerts like hurricanes, tornadoes, extreme temperatures), and the current estimated DEFCON level${locationContext} based on open-source intelligence and news reports as of ${new Date().toISOString()}. 
-      Provide a structured report with at least 10-15 active emergencies if possible.
-      DEFCON 1 is the most severe (imminent nuclear war), DEFCON 5 is normal peacetime.
-      Focus on events that are currently unfolding or have significant impact${locationToSearch ? ` on ${locationToSearch}` : " globally"}.
+      const combinedPrompt = `Perform a comprehensive global intelligence scan as of ${new Date().toISOString()}${locationContext}.
       
-      For each emergency:
-      1. Provide approximate latitude and longitude coordinates.
-      2. Categorize it into one of: WARFARE, EARTHQUAKE, FIRE, NATURAL_DISASTER, HEALTH, CYBER, ECONOMY, SPACE, TERRORISM, FINANCE, STOCK, AGRICULTURE, OTHER. 
-      - Weather events should be NATURAL_DISASTER.
-      - Hacking, data breaches, and infrastructure attacks should be CYBER.
-      - Market crashes, hyperinflation, and trade wars should be ECONOMY.
-      - Solar flares and satellite failures should be SPACE.
-      - Insurgency and extremist attacks should be TERRORISM.
-      - Banking crises, currency devaluations, and fiscal policy shocks should be FINANCE.
-      - Major stock market crashes or volatility should be STOCK.
-      - Crop failures, food shortages, and agricultural crises should be AGRICULTURE.
+      CRITICAL: As of March 2026, the President of the United States is Donald Trump. Ensure all world leader information is accurate for the current date. Use the googleSearch tool to verify current office holders for all countries listed.
       
-      STRICT REQUIREMENT: For EVERY emergency tab (CYBER, ECONOMY, SPACE, TERRORISM, FINANCE, STOCK, AGRICULTURE, etc.), you MUST find and provide REAL, OFFICIAL article URLs from reputable sources like Reuters, AP, BBC, or government agencies.
+      PART 1: EMERGENCY STATUS & DEFCON
+      Search for current emergencies, major conflicts, natural disasters, and estimate the current DEFCON level (1-5).
+      Provide a structured report with 10-15 active emergencies.
+      Check for high-priority live interruptions or emergency broadcasts from the U.S. President or NATO.
       
-      3. For EARTHQUAKE events (especially HIGH or CRITICAL severity), include the magnitude or intensity (e.g., Richter scale).
-      4. Provide an approximate timestamp of occurrence in ISO format.
+      PART 2: STRATEGIC BRIEFINGS
+      Provide 3 strategic briefings on major global trends or under-the-radar geopolitical shifts (supply chain, food security, energy stability, cyber-infrastructure).
       
-      Also, check if there are any high-priority live interruptions or emergency broadcasts from the U.S. President or NATO [Breaking News] that are currently relevant or very recent. 
-      STRICT REQUIREMENT: Only provide links from OFFICIAL and VERIFIED sources.
-      Prioritize:
-      - White House YouTube: https://www.youtube.com/@WhiteHouse/live
-      - C-SPAN YouTube: https://www.youtube.com/@CSPAN/live
-      - Reuters YouTube: https://www.youtube.com/@Reuters/live
-      - NATO News: https://www.youtube.com/@NATO/live
-      - AP News: https://apnews.com
-      - Reuters: https://www.reuters.com
-      Ensure the URL is a direct link to the live broadcast or a highly credible news landing page. 
-      If no direct live stream is found but the event is real, provide a link to a major news coverage page from a reputable source (AP, Reuters, BBC, NATO official site).
-      Include an 'article_url' if there is a specific news article or official statement page for the event.
-      DO NOT provide broken, dead, or non-official links. If you are unsure of a link's validity, do not include it. If search fails to find a specific article, use the homepage of a major news outlet (e.g., https://www.reuters.com).`;
+      PART 3: WORLD LEADERS WATCHLIST
+      Provide a watchlist of 6 key world leaders (e.g., US, China, Russia, UK, France, Germany, or others in high-stakes situations).
+      For each leader, provide: name, title, country, status (STABLE, ELEVATED, CRITICAL), recent actions, allies, conflicts, associated crises (title/url), and a portrait URL.
+      
+      STRICT REQUIREMENT: All article and portrait URLs MUST be REAL, VALID, and OFFICIAL. Use the googleSearch tool to verify.`;
 
-      const statusResponse = await ai.models.generateContent({
+      addLog("Generating intelligence report (this may take 30-60s)...");
+      const response = await withRetry(() => ai.models.generateContent({
         model: "gemini-3-flash-preview",
-        contents: statusPrompt,
+        contents: combinedPrompt,
         config: {
           systemInstruction,
           thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
@@ -818,14 +1827,8 @@ export default function App() {
                   properties: {
                     id: { type: Type.STRING },
                     title: { type: Type.STRING },
-                    severity: { 
-                      type: Type.STRING, 
-                      description: "One of: CRITICAL, HIGH, MEDIUM, LOW" 
-                    },
-                    category: {
-                      type: Type.STRING,
-                      description: "One of: WARFARE, EARTHQUAKE, FIRE, NATURAL_DISASTER, HEALTH, CYBER, ECONOMY, SPACE, TERRORISM, FINANCE, STOCK, AGRICULTURE, OTHER"
-                    },
+                    severity: { type: Type.STRING, description: "CRITICAL, HIGH, MEDIUM, LOW" },
+                    category: { type: Type.STRING },
                     location: { type: Type.STRING },
                     coordinates: {
                       type: Type.OBJECT,
@@ -835,133 +1838,99 @@ export default function App() {
                       },
                       required: ["lat", "lng"]
                     },
-                    summary: { type: Type.STRING, description: "Follow the strict 🚨 format provided in system instructions." },
-                    source_url: { type: Type.STRING, description: "REAL, VALID URL to the source article." },
-                    magnitude: { type: Type.STRING, description: "Magnitude/intensity for earthquakes" },
-                    timestamp: { type: Type.STRING, description: "ISO timestamp of occurrence" },
+                    summary: { type: Type.STRING },
+                    source_url: { type: Type.STRING },
+                    magnitude: { type: Type.STRING },
+                    timestamp: { type: Type.STRING },
                   },
                   required: ["id", "title", "severity", "category", "location", "summary", "coordinates", "timestamp", "source_url"]
                 }
               },
-              stability_assessment: {
-                type: Type.STRING,
-                description: "A brief general assessment of global stability."
-              },
+              stability_assessment: { type: Type.STRING },
               presidential_interruption: {
                 type: Type.OBJECT,
                 properties: {
                   title: { type: Type.STRING },
-                  message: { type: Type.STRING, description: "Follow the strict 🚨 format provided in system instructions." },
+                  message: { type: Type.STRING },
                   timestamp: { type: Type.STRING },
-                  live_url: { type: Type.STRING, description: "REAL, VALID URL to a live stream of the broadcast if available" },
-                  article_url: { type: Type.STRING, description: "REAL, VALID URL to an official article or statement page" }
+                  live_url: { type: Type.STRING },
+                  article_url: { type: Type.STRING }
                 },
                 required: ["title", "message", "timestamp"]
+              },
+              briefings: {
+                type: Type.ARRAY,
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    id: { type: Type.STRING },
+                    title: { type: Type.STRING },
+                    summary: { type: Type.STRING },
+                    impact_level: { type: Type.STRING },
+                    source: { type: Type.STRING }
+                  },
+                  required: ["id", "title", "summary", "impact_level", "source"]
+                }
+              },
+              leaders: {
+                type: Type.ARRAY,
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    id: { type: Type.STRING },
+                    name: { type: Type.STRING },
+                    title: { type: Type.STRING },
+                    country: { type: Type.STRING },
+                    status: { type: Type.STRING },
+                    portrait_url: { type: Type.STRING },
+                    recent_actions: { type: Type.ARRAY, items: { type: Type.STRING } },
+                    allies: { type: Type.ARRAY, items: { type: Type.STRING } },
+                    conflicts: { type: Type.ARRAY, items: { type: Type.STRING } },
+                    associated_crises: {
+                      type: Type.ARRAY,
+                      items: {
+                        type: Type.OBJECT,
+                        properties: {
+                          title: { type: Type.STRING },
+                          url: { type: Type.STRING }
+                        },
+                        required: ["title", "url"]
+                      }
+                    }
+                  },
+                  required: ["id", "name", "title", "country", "status", "portrait_url", "recent_actions", "allies", "conflicts", "associated_crises"]
+                }
               }
             },
-            required: ["defcon_level", "emergencies", "stability_assessment"]
+            required: ["defcon_level", "emergencies", "stability_assessment", "briefings", "leaders"]
           }
         }
-      });
+      }));
 
-      const statusData = safeJsonParse(statusResponse.text, {});
+      addLog("Parsing intelligence data...");
+      const data = safeJsonParse(response.text, {});
       const newStatus: GlobalStatus = {
-        defcon_level: statusData.defcon_level || 5,
-        emergencies: Array.isArray(statusData.emergencies) ? statusData.emergencies : [],
-        stability_assessment: statusData.stability_assessment || "Stability assessment unavailable.",
-        presidential_interruption: statusData.presidential_interruption,
+        defcon_level: data.defcon_level || 5,
+        emergencies: Array.isArray(data.emergencies) ? data.emergencies : [],
+        humanitarian_efforts: prevStatusRef.current?.humanitarian_efforts || [],
+        stability_assessment: data.stability_assessment || "Stability assessment unavailable.",
+        presidential_interruption: data.presidential_interruption,
         last_updated: new Date().toISOString()
       };
 
-      // Fetch Strategic Briefings
-      const briefingPrompt = `Provide 3 strategic briefings on major global trends or under-the-radar geopolitical shifts as of ${new Date().toISOString()}. 
-      Focus on supply chain, food security, energy stability, and cyber-infrastructure. 
-      Return a JSON array of objects with: id, title, summary, impact_level (HIGH, MEDIUM, LOW), source.`;
+      setStatus(newStatus);
 
-      const briefingResponse = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: briefingPrompt,
-        config: {
-          systemInstruction,
-          thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
-          tools: [{ googleSearch: {} }],
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: Type.ARRAY,
-            items: {
-              type: Type.OBJECT,
-              properties: {
-                id: { type: Type.STRING },
-                title: { type: Type.STRING },
-                summary: { type: Type.STRING, description: "Follow the strict 🚨 format provided in system instructions." },
-                impact_level: { type: Type.STRING },
-                source: { type: Type.STRING }
-              },
-              required: ["id", "title", "summary", "impact_level", "source"]
-            }
-          }
-        }
-      });
+      if (Array.isArray(data.briefings)) {
+        setBriefings(prev => {
+          if (prev.length === 0) return data.briefings;
+          const existingIds = new Set(prev.map(b => b.id));
+          return [...data.briefings.filter((b: any) => !existingIds.has(b.id)), ...prev].slice(0, 50);
+        });
+      }
 
-      const briefingData = safeJsonParse(briefingResponse.text, []);
-      setBriefings(briefingData);
-
-      // Fetch World Leaders Watchlist
-      const leaderPrompt = `Provide a watchlist of 6 key world leaders (e.g., US, China, Russia, UK, France, Germany, or others currently in high-stakes situations) as of ${new Date().toISOString()}. 
-      For each leader, provide:
-      1. Name and Title.
-      2. Country.
-      3. Current Status (STABLE, ELEVATED, CRITICAL) based on their recent geopolitical actions or domestic stability.
-      4. A list of 3-4 recent significant actions or statements.
-      5. A list of allies and conflicts (names of other countries or leaders).
-      6. Associated crisis nodes (objects with 'title' and 'url' to a REAL, OFFICIAL news article about their involvement). 
-         STRICT REQUIREMENT: If a leader is associated with a "dossier" (e.g., Trump Dossier, Steele Dossier, or any other intelligence dossier), you MUST provide a link to an OFFICIAL and RELIABLE article from a major news outlet (Reuters, AP, BBC, etc.).
-      7. A REAL, HIGH-QUALITY portrait URL. Prioritize official government sites (.gov), Wikipedia, or verified social media profile images (X, Facebook, etc.). Ensure the URL is direct to the image file.
-      STRICT REQUIREMENT: All news links must be from official sources (Reuters, AP, BBC, Government sites).
-      Return a JSON array of objects with: id, name, title, country, status, portrait_url, recent_actions, allies, conflicts, associated_crises.`;
-
-      const leaderResponse = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: leaderPrompt,
-        config: {
-          systemInstruction,
-          thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
-          tools: [{ googleSearch: {} }],
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: Type.ARRAY,
-            items: {
-              type: Type.OBJECT,
-              properties: {
-                id: { type: Type.STRING },
-                name: { type: Type.STRING },
-                title: { type: Type.STRING },
-                country: { type: Type.STRING },
-                status: { type: Type.STRING, description: "STABLE, ELEVATED, CRITICAL" },
-                portrait_url: { type: Type.STRING, description: "REAL, VALID URL to a portrait image." },
-                recent_actions: { type: Type.ARRAY, items: { type: Type.STRING } },
-                allies: { type: Type.ARRAY, items: { type: Type.STRING } },
-                conflicts: { type: Type.ARRAY, items: { type: Type.STRING } },
-                associated_crises: { 
-                  type: Type.ARRAY, 
-                  items: { 
-                    type: Type.OBJECT,
-                    properties: {
-                      title: { type: Type.STRING },
-                      url: { type: Type.STRING, description: "REAL, VALID URL to a news article." }
-                    },
-                    required: ["title", "url"]
-                  } 
-                }
-              },
-              required: ["id", "name", "title", "country", "status", "portrait_url", "recent_actions", "allies", "conflicts", "associated_crises"]
-            }
-          }
-        }
-      });
-
-      const leaderData = safeJsonParse(leaderResponse.text, []);
-      setLeaders(leaderData);
+      if (Array.isArray(data.leaders)) {
+        setLeaders(data.leaders);
+      }
       
       // History tracking
       const newHistoryItems: HistoryItem[] = [];
@@ -993,15 +1962,44 @@ export default function App() {
             severity: e.severity
           });
           if (e.severity === 'CRITICAL') playAlertSound();
+          if (notificationsEnabled) {
+            new Notification(`${e.severity}: ${e.title}`, { body: e.summary });
+          }
         }
+        setSeenIds(prev => new Set(prev).add(e.id));
       });
 
       if (newHistoryItems.length > 0) {
         setAlertHistory(prev => [...newHistoryItems, ...prev].slice(0, 100));
       }
+      addLog("Intelligence synchronization successful.");
 
       prevStatusRef.current = newStatus;
-      setStatus(newStatus);
+      setStatus(prev => {
+        if (!prev) return newStatus;
+        
+        // Check if day changed (using local time)
+        const prevDate = new Date(prev.last_updated).toDateString();
+        const newDate = new Date(newStatus.last_updated).toDateString();
+        
+        if (prevDate !== newDate) {
+          return newStatus; // Clear and start new day
+        }
+        
+        // Merge emergencies, avoiding duplicates by ID
+        const existingIds = new Set(prev.emergencies.map(e => e.id));
+        const mergedEmergencies = [
+          ...newStatus.emergencies.filter(e => !existingIds.has(e.id)),
+          ...prev.emergencies
+        ].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+         .slice(0, 300); // Keep last 300 for a comprehensive daily archive
+        
+        return {
+          ...newStatus,
+          emergencies: mergedEmergencies,
+          humanitarian_efforts: prev.humanitarian_efforts // Preserve efforts from WebSocket
+        };
+      });
       setActiveLocation(locationToSearch || 'Global');
       setIsBannerDismissed(false); // Reset dismissal on new scan results
 
@@ -1044,17 +2042,21 @@ export default function App() {
           }
         }
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error("Failed to fetch status:", err);
-      setError("Failed to retrieve global status. Please check your connection and try again.");
+      const errorMessage = err.message || "Unknown error";
+      setError(`Failed to retrieve global status: ${errorMessage}. Please check your connection and try again.`);
     } finally {
       setLoading(false);
     }
-  }, [notificationsEnabled, searchLocation, isPanicMode, seenIds]);
+  }, [notificationsEnabled, searchLocation, isPanicMode, seenIds, runtimeConfig, addLog]);
 
+  // Initial data fetch - only after user clicks "Start Scan"
   useEffect(() => {
-    fetchStatus();
-  }, []);
+    if (isInitialScan) {
+      fetchStatus();
+    }
+  }, [fetchStatus, isInitialScan]);
 
   const triggerPanic = () => {
     setIsPanicMode(true);
@@ -1087,11 +2089,11 @@ export default function App() {
   // Auto-scan every 15 minutes if enabled
   useEffect(() => {
     let interval: NodeJS.Timeout;
-    if (isAutoScanning) {
+    if (isAutoScanning && isInitialScan) {
       interval = setInterval(fetchStatus, 15 * 60 * 1000);
     }
     return () => clearInterval(interval);
-  }, [isAutoScanning, fetchStatus]);
+  }, [isAutoScanning, fetchStatus, isInitialScan]);
 
   const toggleNotifications = async () => {
     if (!notificationsEnabled) {
@@ -1114,6 +2116,12 @@ export default function App() {
   const clearSearch = () => {
     setSearchLocation('');
     fetchStatus('');
+  };
+
+  const safeUrl = (url?: string) => {
+    if (!url) return null;
+    if (url.startsWith('http')) return url;
+    return `https://${url}`;
   };
 
   const severityOrder: Record<string, number> = { 'CRITICAL': 0, 'HIGH': 1, 'MEDIUM': 2, 'LOW': 3 };
@@ -1154,18 +2162,13 @@ export default function App() {
   const hasCriticalAlert = status && (status.defcon_level <= 2);
   const showBanner = hasCriticalAlert && !isBannerDismissed;
 
-  // Initial data fetch and refresh interval
-  useEffect(() => {
-    if (!isInitialScan) return; // Only fetch data if initial scan is initiated
-    fetchStatus();
-    const interval = setInterval(() => fetchStatus(), 30000); // Refresh every 30 seconds
-    return () => clearInterval(interval);
-  }, [fetchStatus, isInitialScan]);
+
 
   return (
     <div className={cn(
-      "min-h-screen bg-[#0A0A0B] text-[#E4E4E7] font-sans selection:bg-red-500/30 transition-all duration-1000",
-      status?.defcon_level === 1 && "defcon-1-glitch"
+      "min-h-screen text-[#E4E4E7] font-sans selection:bg-red-500/30 transition-all duration-1000",
+      dashboardMode === 'THREAT' ? "bg-[#0A0A0B]" : "bg-[#020804]",
+      status?.defcon_level === 1 && dashboardMode === 'THREAT' && "defcon-1-glitch"
     )}>
       <DefconOneOverlay 
         isOpen={isDefconOneOpen} 
@@ -1175,8 +2178,6 @@ export default function App() {
       <SettingsModal
         isSettingsOpen={isSettingsOpen}
         setIsSettingsOpen={setIsSettingsOpen}
-        theme={theme}
-        setTheme={setTheme}
         handleSoundUpload={handleSoundUpload}
         customSoundUrl={customSoundUrl}
         setCustomSoundUrl={setCustomSoundUrl}
@@ -1342,6 +2343,7 @@ export default function App() {
                             href={safeUrl(crisis.url)!}
                             target="_blank"
                             rel="noopener noreferrer"
+                            referrerPolicy="no-referrer"
                             className="flex items-center justify-between p-3 rounded-xl bg-white/5 border border-white/10 group cursor-pointer hover:bg-white/10 transition-all"
                           >
                             <span className="text-[10px] font-bold text-white/80 uppercase tracking-tight">{crisis.title}</span>
@@ -1362,8 +2364,6 @@ export default function App() {
       <Header
         showHeader={showHeader}
         defconLevel={status?.defcon_level || 5}
-        theme={theme}
-        setTheme={setTheme}
         isPanicMode={isPanicMode}
         togglePanicMode={togglePanicMode}
         setIsSettingsOpen={setIsSettingsOpen}
@@ -1385,8 +2385,78 @@ export default function App() {
         setIsAutoScanning={setIsAutoScanning}
       />
 
-      {/* Leader Watchlist Carousel */}
-      <div className="bg-black/20 border-b border-white/5 py-4 overflow-x-auto custom-scrollbar">
+      {!isInitialScan && (
+        <div className="fixed inset-0 z-40 bg-black/80 backdrop-blur-xl flex flex-col items-center justify-center p-6 text-center">
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="max-w-md w-full space-y-8"
+          >
+            <div className="relative">
+              <div className="absolute inset-0 bg-red-600/20 blur-3xl rounded-full animate-pulse" />
+              <ShieldAlert className="w-24 h-24 text-red-600 mx-auto relative z-10" />
+            </div>
+            
+            <div className="space-y-4">
+              <h2 className="text-3xl font-black text-white uppercase tracking-tighter">System Standby</h2>
+              <div className="space-y-1">
+                <p className="text-red-500 text-[10px] font-mono uppercase tracking-[0.3em] font-bold">Sovereign-Resilience Intelligence Network</p>
+                <p className="text-white/40 text-[9px] font-mono uppercase tracking-widest">Global Threat-Humanitarian Monitor</p>
+              </div>
+              <p className="text-white/60 text-sm leading-relaxed font-medium pt-2">
+                The network is ready. 
+                Initiate a global scan to gather real-time crisis data, 
+                geopolitical briefings, and humanitarian resilience protocols.
+              </p>
+            </div>
+
+            <button 
+              onClick={startInitialScan}
+              className="group relative px-10 py-4 bg-red-600 hover:bg-red-700 text-white rounded-2xl font-black uppercase tracking-[0.3em] transition-all shadow-[0_0_40px_rgba(220,38,38,0.4)] hover:scale-105 active:scale-95 overflow-hidden"
+            >
+              <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent -translate-x-full group-hover:animate-shimmer" />
+              <div className="flex items-center gap-3">
+                <Play className="w-5 h-5 fill-white" />
+                <span>Initiate Scan</span>
+              </div>
+            </button>
+
+            <div className="pt-8 flex items-center justify-center gap-6 opacity-40">
+              <div className="flex flex-col items-center gap-1">
+                <Globe className="w-4 h-4" />
+                <span className="text-[8px] font-mono uppercase tracking-widest">Global</span>
+              </div>
+              <div className="w-px h-4 bg-white/20" />
+              <div className="flex flex-col items-center gap-1">
+                <Zap className="w-4 h-4" />
+                <span className="text-[8px] font-mono uppercase tracking-widest">Real-time</span>
+              </div>
+              <div className="w-px h-4 bg-white/20" />
+              <div className="flex flex-col items-center gap-1">
+                <ShieldCheck className="w-4 h-4" />
+                <span className="text-[8px] font-mono uppercase tracking-widest">Secure</span>
+              </div>
+            </div>
+          </motion.div>
+        </div>
+      )}
+
+      <DashboardToggle mode={dashboardMode} setMode={setDashboardMode} showHeader={showHeader} />
+
+      <AnimatePresence>
+      </AnimatePresence>
+
+      <AnimatePresence mode="wait">
+        {dashboardMode === 'THREAT' ? (
+          <motion.div
+            key="threat"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.5 }}
+          >
+            {/* Leader Watchlist Carousel */}
+            <div className="bg-black/20 border-b border-white/5 py-4 overflow-x-auto custom-scrollbar">
         <div className="max-w-7xl mx-auto px-4 flex items-center gap-6">
           <div className="shrink-0 flex flex-col">
             <span className="text-[8px] font-mono text-white/30 uppercase tracking-[0.3em] mb-1">Intelligence</span>
@@ -1438,6 +2508,16 @@ export default function App() {
       </div>
 
       <main className="max-w-7xl mx-auto px-4 py-8">
+        {!runtimeConfig.GEMINI_API_KEY && !process.env.GEMINI_API_KEY && !error && (
+          <div className="mb-8 p-4 bg-blue-500/10 border border-blue-500/20 rounded-lg flex items-start gap-3 text-blue-400">
+            <RefreshCw className="w-5 h-5 shrink-0 mt-0.5 animate-spin" />
+            <div>
+              <p className="font-bold text-sm">INITIALIZING SYSTEM</p>
+              <p className="text-xs opacity-80">Synchronizing secure intelligence channels...</p>
+            </div>
+          </div>
+        )}
+
         {error && (
           <div className="mb-8 p-4 bg-red-500/10 border border-red-500/20 rounded-lg flex items-start gap-3 text-red-400">
             <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5" />
@@ -1448,9 +2528,9 @@ export default function App() {
           </div>
         )}
 
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-          {/* Left Column: Strategic Status */}
-          <div className="lg:col-span-4 space-y-6">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+          {/* DEFCON Card - Top Left on Desktop, First on Mobile */}
+          <div className="lg:col-span-4 order-1 lg:order-none">
             {/* Modern DEFCON Card */}
             <section className="relative group">
               <div className={cn(
@@ -1560,6 +2640,149 @@ export default function App() {
                 </div>
               </div>
             </section>
+          </div>
+
+          {/* Presidential Interruption - Top Right on Desktop, Second on Mobile */}
+          <div className="lg:col-span-8 lg:row-start-1 order-2 lg:order-none">
+            <AnimatePresence>
+              {highPriorityAlerts.length > 0 && (
+                <motion.section 
+                  initial={{ opacity: 0, y: -20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -20 }}
+                  className="bg-red-600 border-4 border-white rounded-[2.5rem] p-8 shadow-[0_0_60px_rgba(220,38,38,0.4)] relative overflow-hidden h-full"
+                >
+                  <div className="absolute top-0 left-0 w-full h-1.5 bg-white/30 animate-pulse" />
+                  <div className="flex flex-col md:flex-row items-center gap-6">
+                    <div className="w-20 h-20 rounded-full bg-white flex items-center justify-center shrink-0 shadow-xl">
+                      <Shield className="w-12 h-12 text-red-600" />
+                    </div>
+                    <div className="text-center md:text-left flex-1">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <h2 className="text-white font-black text-3xl tracking-tighter uppercase leading-none mb-1">
+                            CRITICAL STRATEGIC ALERTS
+                          </h2>
+                          <p className="text-white/90 font-mono text-[10px] uppercase tracking-widest">Live Strategic Broadcast • {highPriorityAlerts[currentSummaryIndex]?.timestamp}</p>
+                        </div>
+                        {highPriorityAlerts.length > 1 && (
+                          <div className="flex items-center gap-2">
+                            <button 
+                              onClick={() => setCurrentSummaryIndex(prev => (prev - 1 + highPriorityAlerts.length) % highPriorityAlerts.length)}
+                              className="p-2 bg-white/10 hover:bg-white/20 rounded-full transition-colors"
+                            >
+                              <ChevronRight className="w-4 h-4 rotate-180" />
+                            </button>
+                            <span className="text-[10px] font-mono font-bold">{currentSummaryIndex + 1} / {highPriorityAlerts.length}</span>
+                            <button 
+                              onClick={() => setCurrentSummaryIndex(prev => (prev + 1) % highPriorityAlerts.length)}
+                              className="p-2 bg-white/10 hover:bg-white/20 rounded-full transition-colors"
+                            >
+                              <ChevronRight className="w-4 h-4" />
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="mt-5 bg-black/20 rounded-2xl p-5 border border-white/20 backdrop-blur-sm">
+                    <h3 className="text-white font-bold text-lg mb-2 uppercase tracking-tight">
+                      {highPriorityAlerts[currentSummaryIndex]?.title}
+                    </h3>
+                    <div className="text-white/95 leading-normal font-medium italic text-base mb-3 whitespace-pre-wrap markdown-body">
+                      <Markdown>
+                        {'message' in highPriorityAlerts[currentSummaryIndex] ? highPriorityAlerts[currentSummaryIndex].message : highPriorityAlerts[currentSummaryIndex].summary}
+                      </Markdown>
+                    </div>
+                    
+                    <div className="mt-4 flex flex-wrap gap-3 items-center">
+                      {('source_url' in highPriorityAlerts[currentSummaryIndex] && safeUrl(highPriorityAlerts[currentSummaryIndex].source_url)) && (
+                        <div className="flex flex-col gap-1">
+                          <a 
+                            href={safeUrl(highPriorityAlerts[currentSummaryIndex].source_url)!}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            referrerPolicy="no-referrer"
+                            className="inline-flex items-center gap-2 px-6 py-3 bg-white text-black rounded-xl font-black uppercase tracking-widest text-[10px] hover:bg-white/90 transition-all shadow-lg"
+                          >
+                            <Search className="w-4 h-4" />
+                            View Full Intelligence
+                          </a>
+                          <LinkStatus url={highPriorityAlerts[currentSummaryIndex].source_url} />
+                        </div>
+                      )}
+                      <a 
+                        href={`https://www.youtube.com/results?search_query=live+news+${encodeURIComponent(highPriorityAlerts[currentSummaryIndex]?.title || '')}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-2 px-6 py-3 bg-black/40 text-white border border-white/20 rounded-xl font-black uppercase tracking-widest text-[10px] hover:bg-black/60 transition-all"
+                      >
+                        <Search className="w-4 h-4" />
+                        Search Live Coverage
+                      </a>
+                      <a 
+                        href="https://www.whitehouse.gov/briefing-room/"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-2 px-6 py-3 bg-red-800 text-white border border-white/20 rounded-xl font-black uppercase tracking-widest text-[10px] hover:bg-red-900 transition-all"
+                      >
+                        <Shield className="w-4 h-4" />
+                        White House Briefing
+                      </a>
+                    </div>
+                  </div>
+                </motion.section>
+              )}
+            </AnimatePresence>
+          </div>
+
+          {/* Left Column: Strategic Status Continued */}
+          <div className="lg:col-span-4 space-y-6 order-3 lg:order-none">
+            {/* Strategic Briefings */}
+            <section className="bg-[#121214] border border-white/10 rounded-[2rem] overflow-hidden">
+              <div className="p-5 flex items-center justify-between border-b border-white/5 bg-white/[0.02]">
+                <div className="flex items-center gap-2">
+                  <Shield className="w-4 h-4 text-blue-500" />
+                  <h2 className="text-[10px] font-mono font-bold text-white/40 uppercase tracking-[0.2em]">Strategic Briefings</h2>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <div className="w-1 h-1 rounded-full bg-blue-500 animate-pulse" />
+                  <span className="text-[8px] font-mono text-blue-500/80 uppercase">Analysis Active</span>
+                </div>
+              </div>
+              <div className="divide-y divide-white/5">
+                {briefings.length === 0 ? (
+                  <div className="p-12 text-center">
+                    <RefreshCw className="w-6 h-6 text-white/10 mx-auto mb-2 animate-spin" />
+                    <p className="text-[9px] font-mono text-white/20 uppercase tracking-widest">Generating intelligence report...</p>
+                  </div>
+                ) : (
+                  briefings.map((briefing) => (
+                    <div key={briefing.id} className="p-4 hover:bg-white/[0.02] transition-colors group">
+                      <div className="flex items-center justify-between mb-1.5">
+                        <span className={cn(
+                          "text-[8px] font-mono font-bold px-2 py-0.5 rounded border",
+                          briefing.impact_level === 'HIGH' ? "bg-red-500/10 text-red-500 border-red-500/20" :
+                          briefing.impact_level === 'MEDIUM' ? "bg-yellow-500/10 text-yellow-500 border-yellow-500/20" :
+                          "bg-blue-500/10 text-blue-500 border-blue-500/20"
+                        )}>
+                          IMPACT: {briefing.impact_level}
+                        </span>
+                        <div className="flex items-center gap-3">
+                          <span className="text-[8px] font-mono text-white/60 uppercase">
+                            {briefing.source}
+                          </span>
+                        </div>
+                      </div>
+                      <h4 className="text-xs font-bold text-white mb-1.5">{briefing.title}</h4>
+                      <div className="text-[11px] text-white/50 leading-normal whitespace-pre-wrap markdown-body">
+                        <Markdown>{briefing.summary}</Markdown>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </section>
 
             {/* Stability Assessment */}
             <section className="bg-[#121214] border border-white/10 rounded-[2rem] p-6">
@@ -1661,6 +2884,7 @@ export default function App() {
                               href={safeUrl(anomaly.link)!} 
                               target="_blank" 
                               rel="noopener noreferrer"
+                              referrerPolicy="no-referrer"
                               onClick={(e) => e.stopPropagation()}
                               className="inline-flex items-center gap-1 text-[8px] font-bold text-emerald-500 hover:text-emerald-400 transition-colors uppercase tracking-widest"
                             >
@@ -1672,52 +2896,6 @@ export default function App() {
                       </div>
                     ))}
                   </div>
-                )}
-              </div>
-            </section>
-
-            {/* Strategic Briefings */}
-            <section className="bg-[#121214] border border-white/10 rounded-[2rem] overflow-hidden">
-              <div className="p-5 flex items-center justify-between border-b border-white/5 bg-white/[0.02]">
-                <div className="flex items-center gap-2">
-                  <Shield className="w-4 h-4 text-blue-500" />
-                  <h2 className="text-[10px] font-mono font-bold text-white/40 uppercase tracking-[0.2em]">Strategic Briefings</h2>
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <div className="w-1 h-1 rounded-full bg-blue-500 animate-pulse" />
-                  <span className="text-[8px] font-mono text-blue-500/80 uppercase">Analysis Active</span>
-                </div>
-              </div>
-              <div className="divide-y divide-white/5">
-                {briefings.length === 0 ? (
-                  <div className="p-12 text-center">
-                    <RefreshCw className="w-6 h-6 text-white/10 mx-auto mb-2 animate-spin" />
-                    <p className="text-[9px] font-mono text-white/20 uppercase tracking-widest">Generating intelligence report...</p>
-                  </div>
-                ) : (
-                  briefings.map((briefing) => (
-                    <div key={briefing.id} className="p-4 hover:bg-white/[0.02] transition-colors group">
-                      <div className="flex items-center justify-between mb-1.5">
-                        <span className={cn(
-                          "text-[8px] font-mono font-bold px-2 py-0.5 rounded border",
-                          briefing.impact_level === 'HIGH' ? "bg-red-500/10 text-red-500 border-red-500/20" :
-                          briefing.impact_level === 'MEDIUM' ? "bg-yellow-500/10 text-yellow-500 border-yellow-500/20" :
-                          "bg-blue-500/10 text-blue-500 border-blue-500/20"
-                        )}>
-                          IMPACT: {briefing.impact_level}
-                        </span>
-                        <div className="flex items-center gap-3">
-                          <span className="text-[8px] font-mono text-white/60 uppercase">
-                            {briefing.source}
-                          </span>
-                        </div>
-                      </div>
-                      <h4 className="text-xs font-bold text-white mb-1.5">{briefing.title}</h4>
-                      <div className="text-[11px] text-white/50 leading-normal whitespace-pre-wrap markdown-body">
-                        <Markdown>{briefing.summary}</Markdown>
-                      </div>
-                    </div>
-                  ))
                 )}
               </div>
             </section>
@@ -1739,99 +2917,8 @@ export default function App() {
             </div>
           </div>
 
-          {/* Right Column: Tactical Intelligence */}
-          <div className="lg:col-span-8 space-y-8">
-            {/* Presidential Interruption - High Priority */}
-            <AnimatePresence>
-              {highPriorityAlerts.length > 0 && (
-                <motion.section 
-                  initial={{ opacity: 0, y: -20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -20 }}
-                  className="bg-red-600 border-4 border-white rounded-[2.5rem] p-8 shadow-[0_0_60px_rgba(220,38,38,0.4)] relative overflow-hidden"
-                >
-                  <div className="absolute top-0 left-0 w-full h-1.5 bg-white/30 animate-pulse" />
-                  <div className="flex flex-col md:flex-row items-center gap-6">
-                    <div className="w-20 h-20 rounded-full bg-white flex items-center justify-center shrink-0 shadow-xl">
-                      <Shield className="w-12 h-12 text-red-600" />
-                    </div>
-                    <div className="text-center md:text-left flex-1">
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <h2 className="text-white font-black text-3xl tracking-tighter uppercase leading-none mb-1">
-                            CRITICAL STRATEGIC ALERTS
-                          </h2>
-                          <p className="text-white/90 font-mono text-[10px] uppercase tracking-widest">Live Strategic Broadcast • {highPriorityAlerts[currentSummaryIndex]?.timestamp}</p>
-                        </div>
-                        {highPriorityAlerts.length > 1 && (
-                          <div className="flex items-center gap-2">
-                            <button 
-                              onClick={() => setCurrentSummaryIndex(prev => (prev - 1 + highPriorityAlerts.length) % highPriorityAlerts.length)}
-                              className="p-2 bg-white/10 hover:bg-white/20 rounded-full transition-colors"
-                            >
-                              <ChevronRight className="w-4 h-4 rotate-180" />
-                            </button>
-                            <span className="text-[10px] font-mono font-bold">{currentSummaryIndex + 1} / {highPriorityAlerts.length}</span>
-                            <button 
-                              onClick={() => setCurrentSummaryIndex(prev => (prev + 1) % highPriorityAlerts.length)}
-                              className="p-2 bg-white/10 hover:bg-white/20 rounded-full transition-colors"
-                            >
-                              <ChevronRight className="w-4 h-4" />
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                  <div className="mt-5 bg-black/20 rounded-2xl p-5 border border-white/20 backdrop-blur-sm">
-                    <h3 className="text-white font-bold text-lg mb-2 uppercase tracking-tight">
-                      {highPriorityAlerts[currentSummaryIndex]?.title}
-                    </h3>
-                    <div className="text-white/95 leading-normal font-medium italic text-base mb-3 whitespace-pre-wrap markdown-body">
-                      <Markdown>
-                        {'message' in highPriorityAlerts[currentSummaryIndex] ? highPriorityAlerts[currentSummaryIndex].message : highPriorityAlerts[currentSummaryIndex].summary}
-                      </Markdown>
-                    </div>
-                    
-                    <div className="mt-4 flex flex-wrap gap-3 items-center">
-                      {('source_url' in highPriorityAlerts[currentSummaryIndex] && safeUrl(highPriorityAlerts[currentSummaryIndex].source_url)) && (
-                        <div className="flex flex-col gap-1">
-                          <a 
-                            href={safeUrl(highPriorityAlerts[currentSummaryIndex].source_url)!}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="inline-flex items-center gap-2 px-6 py-3 bg-white text-black rounded-xl font-black uppercase tracking-widest text-[10px] hover:bg-white/90 transition-all shadow-lg"
-                          >
-                            <Search className="w-4 h-4" />
-                            View Full Intelligence
-                          </a>
-                          <LinkStatus url={highPriorityAlerts[currentSummaryIndex].source_url} />
-                        </div>
-                      )}
-                      <a 
-                        href={`https://www.youtube.com/results?search_query=live+news+${encodeURIComponent(highPriorityAlerts[currentSummaryIndex]?.title || '')}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center gap-2 px-6 py-3 bg-black/40 text-white border border-white/20 rounded-xl font-black uppercase tracking-widest text-[10px] hover:bg-black/60 transition-all"
-                      >
-                        <Search className="w-4 h-4" />
-                        Search Live Coverage
-                      </a>
-                      <a 
-                        href="https://www.whitehouse.gov/briefing-room/"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center gap-2 px-6 py-3 bg-red-800 text-white border border-white/20 rounded-xl font-black uppercase tracking-widest text-[10px] hover:bg-red-900 transition-all"
-                      >
-                        <Shield className="w-4 h-4" />
-                        White House Briefing
-                      </a>
-                    </div>
-                  </div>
-                </motion.section>
-              )}
-            </AnimatePresence>
-
+          {/* Right Column: Tactical Intelligence Continued */}
+          <div className="lg:col-span-8 space-y-8 order-4 lg:order-none">
             {/* Map Overview - Expanded */}
             <section className="bg-[#121214] border border-white/10 rounded-[2.5rem] p-8 overflow-hidden shadow-2xl">
               <div className="flex items-center justify-between mb-6">
@@ -1905,9 +2992,11 @@ export default function App() {
                   )}
                 </h2>
               </div>
-              <span className="text-[10px] font-mono text-white/40 uppercase tracking-widest">
-                {filteredEmergencies.length} Active Intelligence Nodes
-              </span>
+              <div className="flex items-center gap-4">
+                <span className="text-[10px] font-mono text-white/40 uppercase tracking-widest">
+                  {filteredEmergencies.length} Active Intelligence Nodes
+                </span>
+              </div>
             </div>
 
             <div className="space-y-4">
@@ -2032,6 +3121,7 @@ export default function App() {
                                     href={safeUrl(emergency.source_url)!} 
                                     target="_blank" 
                                     rel="noopener noreferrer"
+                                    referrerPolicy="no-referrer"
                                     onClick={(e) => e.stopPropagation()}
                                     className="inline-flex items-center gap-2 text-[10px] font-bold text-red-500 hover:text-red-400 transition-colors uppercase tracking-widest"
                                   >
@@ -2053,6 +3143,11 @@ export default function App() {
           </div>
         </div>
       </main>
+    </motion.div>
+  ) : (
+    <ResilienceDashboard key="resilience" status={status} />
+  )}
+</AnimatePresence>
 
       {/* DEFCON Info Modal */}
       <AnimatePresence>
@@ -2135,11 +3230,11 @@ export default function App() {
       </AnimatePresence>
 
       {/* Footer */}
-      <footer className="mt-20 border-t border-white/10 py-12 bg-black/40">
+      <footer className="mt-20 border-t border-white/10 py-12 bg-black/40 print:hidden">
         <div className="max-w-7xl mx-auto px-4 flex flex-col md:flex-row justify-between items-center gap-8">
           <div className="flex items-center gap-3 opacity-50">
             <ShieldAlert className="w-5 h-5" />
-            <span className="text-xs font-mono uppercase tracking-widest">Sentinel Intelligence Network</span>
+            <span className="text-xs font-mono uppercase tracking-widest">Sovereign-Resilience Intelligence Network</span>
           </div>
           
           <div className="flex gap-8 text-[10px] font-mono text-white/70 uppercase tracking-widest">
@@ -2159,7 +3254,7 @@ export default function App() {
 
           <div className="flex flex-col items-center md:items-end gap-2">
             <p className="text-[10px] font-mono text-white/60 max-w-xs text-center md:text-right">
-              Sentinel Intelligence Network is a free, hobbyist project created strictly for educational and informational purposes. We aggregate publicly available news and data to provide a high-level overview of global events.
+              Sovereign-Resilience Intelligence Network is a free, hobbyist project created strictly for educational and informational purposes. We aggregate publicly available news and data to provide a high-level overview of global events.
             </p>
             <div className="text-[8px] font-mono text-white/50 tracking-[0.4em] font-bold uppercase mt-2">
               CREATOR INFO [ LIBRA420T & ARIESSECRET3 ]
@@ -2170,6 +3265,7 @@ export default function App() {
         <div className="max-w-7xl mx-auto px-4 mt-8 pt-8 border-t border-white/5">
           <p className="text-[9px] font-mono text-white/40 leading-relaxed text-center uppercase tracking-widest">
             DISCLAIMER: This website is provided "As-Is" and makes no guarantees regarding the accuracy, completeness, or real-time reliability of the information displayed. 
+            Educational use only, we do not collect data.
           </p>
           <p className="text-[10px] font-mono text-red-400 font-bold leading-relaxed text-center uppercase tracking-widest mt-2 bg-red-500/10 py-3 px-6 rounded-xl border border-red-500/30 shadow-[0_0_30px_rgba(239,68,68,0.1)]">
             The data and threat assessments shown here should never be used for emergency planning, personal safety assessments, travel decisions, or financial planning. 

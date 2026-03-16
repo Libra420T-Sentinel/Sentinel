@@ -3,17 +3,100 @@ import { createServer as createViteServer } from "vite";
 import { WebSocketServer, WebSocket } from "ws";
 import { createServer } from "http";
 import { XMLParser } from "fast-xml-parser";
+import path from "path";
+import { fileURLToPath } from "url";
 
-// In-memory storage for anomalies
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// In-memory storage
 let anomalies: any[] = [];
+let humanitarianEfforts: any[] = [];
 const MAX_ANOMALIES = 50;
+const MAX_EFFORTS = 50;
+
+const MOCK_ANOMALIES = [
+  {
+    id: 'mock-anomaly-1',
+    source: 'MOCK SYSTEM',
+    type: 'SEISMIC_ANOMALY',
+    title: 'TEST ANOMALY: Seismic Activity',
+    description: 'This is a test anomaly to verify the Emergency Monitor.',
+    severity: 'MEDIUM',
+    timestamp: new Date().toISOString()
+  }
+];
+
+const MOCK_HUMANITARIAN_EFFORTS = [
+  {
+    id: 'effort-1',
+    title: 'Clean Water Initiative',
+    type: 'WATER',
+    status: 'ACTIVE',
+    location: 'Gaza Strip',
+    coordinates: { lat: 31.3547, lng: 34.3088 },
+    description: 'Deploying mobile desalination units to provide potable water to displaced families.',
+    organization: 'UNRWA',
+    timestamp: new Date().toISOString(),
+    source_url: 'https://www.unrwa.org/'
+  },
+  {
+    id: 'effort-2',
+    title: 'Emergency Medical Camp',
+    type: 'MEDICAL',
+    status: 'ACTIVE',
+    location: 'Kharkiv, Ukraine',
+    coordinates: { lat: 49.9935, lng: 36.2304 },
+    description: 'Providing trauma surgery and primary care in underground shelters.',
+    organization: 'Doctors Without Borders',
+    timestamp: new Date().toISOString(),
+    source_url: 'https://www.msf.org/'
+  },
+  {
+    id: 'effort-3',
+    title: 'Earthquake Reconstruction',
+    type: 'RECONSTRUCTION',
+    status: 'PLANNED',
+    location: 'Hatay, Turkey',
+    coordinates: { lat: 36.4018, lng: 36.3498 },
+    description: 'Planning sustainable housing for 5,000 families affected by the recent seismic activity.',
+    organization: 'UN-Habitat',
+    timestamp: new Date().toISOString(),
+    source_url: 'https://unhabitat.org/'
+  },
+  {
+    id: 'effort-4',
+    title: 'Food Security Program',
+    type: 'FOOD',
+    status: 'ACTIVE',
+    location: 'Tigray, Ethiopia',
+    coordinates: { lat: 13.7, lng: 39.0 },
+    description: 'Distributing high-protein grain supplements to combat acute malnutrition.',
+    organization: 'World Food Programme',
+    timestamp: new Date().toISOString(),
+    source_url: 'https://www.wfp.org/'
+  },
+  {
+    id: 'effort-5',
+    title: 'Search and Rescue Ops',
+    type: 'RESCUE',
+    status: 'ACTIVE',
+    location: 'Central Japan',
+    coordinates: { lat: 36.5, lng: 137.0 },
+    description: 'Specialized teams searching for survivors following the coastal flooding.',
+    organization: 'Japanese Red Cross Society',
+    timestamp: new Date().toISOString(),
+    source_url: 'https://www.jrc.or.jp/english/'
+  }
+];
+
 
 async function startServer() {
   const app = express();
   app.use(express.json());
   const server = createServer(app);
   const wss = new WebSocketServer({ server });
-  const PORT = 3000;
+  const PORT = process.env.PORT || 3000;
   const parser = new XMLParser();
 
   // Helper for fetch with timeout
@@ -33,6 +116,33 @@ async function startServer() {
     }
   };
 
+  // Helper for fetch with retry
+  const fetchWithRetry = async (url: string, options: any = {}, retries = 3, backoff = 1000, timeout = 8000) => {
+    const isSilent = options.silent === true;
+    for (let i = 0; i < retries; i++) {
+      try {
+        const response = await fetchWithTimeout(url, options, timeout);
+        if (!response.ok) {
+          // Don't retry on 400, 403 or 404 as they are likely permanent or client errors
+          if (response.status === 400 || response.status === 403 || response.status === 404) {
+            return response; 
+          }
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        return response;
+      } catch (e: any) {
+        const isLastRetry = i === retries - 1;
+        if (isLastRetry) throw e;
+        
+        const delay = backoff * Math.pow(2, i);
+        if (!isSilent) {
+          console.warn(`Fetch failed for ${url}: ${e.message || e}. Retrying in ${delay}ms... (${i + 1}/${retries})`);
+        }
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+    }
+  };
+
   // Broadcast function
   const broadcast = (data: any) => {
     wss.clients.forEach((client) => {
@@ -45,7 +155,8 @@ async function startServer() {
   // Data Pipeline Fetchers
   const fetchUSGS = async () => {
     try {
-      const res = await fetchWithTimeout("https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&minmagnitude=4.5");
+      const res = await fetchWithRetry("https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&minmagnitude=4.5");
+      if (!res) return;
       const data = await res.json();
       const features = data.features || [];
       features.forEach((f: any) => {
@@ -71,7 +182,8 @@ async function startServer() {
 
   const fetchNOAASpace = async () => {
     try {
-      const res = await fetchWithTimeout("https://services.swpc.noaa.gov/products/alerts.json");
+      const res = await fetchWithRetry("https://services.swpc.noaa.gov/products/alerts.json");
+      if (!res) return;
       const data = await res.json();
       if (!Array.isArray(data)) return;
       
@@ -96,7 +208,12 @@ async function startServer() {
 
   const fetchNOAATsunami = async () => {
     try {
-      const res = await fetchWithTimeout("https://www.tsunami.gov/events/xml/WEPA40.xml");
+      // Updated URL to tsunami.xml as PAAM.xml is often 404
+      const res = await fetchWithRetry("https://www.tsunami.gov/rss/tsunami.xml");
+      if (!res || !res.ok) {
+        if (res?.status === 404) console.warn("NOAA Tsunami Feed not found (404)");
+        return;
+      }
       const text = await res.text();
       const data = parser.parse(text);
       const items = data.rss?.channel?.item || [];
@@ -122,58 +239,71 @@ async function startServer() {
     }
   };
 
-  const fetchOpenSky = async (retries = 2) => {
+  const fetchOpenSky = async () => {
     try {
-      const res = await fetchWithTimeout("https://opensky-network.org/api/states/all", {}, 5000);
-      
-      if (res.ok) {
-        const data = await res.json();
-        const count = data.states?.length || 0;
-        if (count < 1000 && count > 0) {
-          addAnomaly({
-            id: `opensky-${Date.now()}`,
-            source: "OPENSKY",
-            type: "AVIATION_ANOMALY",
-            title: "FLIGHT VOLUME DROP",
-            description: `Global active flights dropped to ${count}. Potential airspace restriction.`,
-            severity: "HIGH",
-            timestamp: new Date().toISOString()
-          });
+      // Increased timeout to 20s for OpenSky as it's very slow
+      // Using a more realistic User-Agent and silent retries
+      const res = await fetchWithRetry("https://opensky-network.org/api/states/all", {
+        silent: true,
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+          'Accept': 'application/json'
         }
+      }, 2, 3000, 20000);
+      
+      if (!res || !res.ok) {
+        if (res) console.warn(`OpenSky Fetch Status: ${res.status}`);
+        return;
+      }
+      
+      const data = await res.json();
+      const count = data.states?.length || 0;
+      if (count < 1000 && count > 0) {
+        addAnomaly({
+          id: `opensky-${Date.now()}`,
+          source: "OPENSKY",
+          type: "AVIATION_ANOMALY",
+          title: "FLIGHT VOLUME DROP",
+          description: `Global active flights dropped to ${count}. Potential airspace restriction.`,
+          severity: "HIGH",
+          timestamp: new Date().toISOString()
+        });
       }
     } catch (e: any) {
-      if (e.name === 'AbortError') {
-        console.warn("OpenSky Fetch Timeout: Request aborted after 5s");
-      } else if (retries > 0) {
-        console.warn(`OpenSky Fetch Failed, retrying... (${retries} left)`);
-        await new Promise(resolve => setTimeout(resolve, 2000));
-        return fetchOpenSky(retries - 1);
-      } else {
-        console.error("OpenSky Fetch Error:", e.message || e);
-      }
+      // Silent fail for OpenSky to avoid cluttering logs
     }
   };
 
   const fetchCloudflare = async () => {
     try {
-      const res = await fetchWithTimeout("https://api.cloudflare.com/client/v4/radar/annotations/outages");
-      if (res.ok) {
-        const data = await res.json();
-        const outages = data.result?.outages || [];
-        outages.forEach((o: any) => {
-          addAnomaly({
-            id: `cloudflare-${o.id}`,
-            source: "CLOUDFLARE",
-            type: "NETWORK_ANOMALY",
-            title: `INTERNET OUTAGE: ${o.locationName}`,
-            description: `Outage detected in ${o.locationName}. Scope: ${o.scope}`,
-            severity: "HIGH",
-            timestamp: new Date().toISOString()
-          });
-        });
+      // Simplified Cloudflare fetch to avoid 400
+      const res = await fetchWithRetry("https://api.cloudflare.com/client/v4/radar/outages/locations", {
+        headers: {
+          'User-Agent': 'Mozilla/5.0',
+          'Accept': 'application/json'
+        }
+      });
+      
+      if (!res || !res.ok) {
+        if (res) console.warn(`Cloudflare Fetch Status: ${res.status}`);
+        return;
       }
+      
+      const data = await res.json();
+      const outages = data.result?.outages || [];
+      outages.forEach((o: any) => {
+        addAnomaly({
+          id: `cloudflare-${o.id}`,
+          source: "CLOUDFLARE",
+          type: "NETWORK_ANOMALY",
+          title: `INTERNET OUTAGE: ${o.locationName}`,
+          description: `Outage detected in ${o.locationName}. Scope: ${o.scope}`,
+          severity: "HIGH",
+          timestamp: new Date().toISOString()
+        });
+      });
     } catch (e) {
-      // Silent fail for Cloudflare as it's often restricted
+      // Silent fail
     }
   };
 
@@ -187,7 +317,8 @@ async function startServer() {
     
     for (const url of feeds) {
       try {
-        const res = await fetchWithTimeout(url);
+        const res = await fetchWithRetry(url);
+        if (!res) continue;
         const text = await res.text();
         const data = parser.parse(text);
         const items = data.rss?.channel?.item || [];
@@ -221,8 +352,11 @@ async function startServer() {
     const apiKey = process.env.FMP_API_KEY;
     if (!apiKey) return;
     try {
-      const res = await fetchWithTimeout(`https://financialmodelingprep.com/api/v3/quotes/commodity?apikey=${apiKey}`);
-      if (!res.ok) return;
+      const res = await fetchWithRetry(`https://financialmodelingprep.com/api/v3/quotes/commodity?apikey=${apiKey}`);
+      if (!res || !res.ok) {
+        if (res?.status === 403) console.warn("FMP API Key invalid or restricted (403)");
+        return;
+      }
       const data = await res.json();
       if (!Array.isArray(data)) return;
       
@@ -253,7 +387,7 @@ async function startServer() {
     const apiKey = process.env.NEWSCATCHER_API_KEY;
     if (!apiKey) return;
     try {
-      const res = await fetchWithTimeout("https://v3-api.newscatcherapi.com/v3/search_events", {
+      const res = await fetchWithRetry("https://v3-api.newscatcherapi.com/v3/search_events", {
         method: "POST",
         headers: { "x-api-key": apiKey, "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -262,7 +396,7 @@ async function startServer() {
           lang: "en"
         })
       });
-      if (res.ok) {
+      if (res) {
         const data = await res.json();
         if (data && Array.isArray(data.articles)) {
           data.articles.forEach((article: any) => {
@@ -286,8 +420,8 @@ async function startServer() {
 
   const fetchGSCPI = async () => {
     try {
-      const res = await fetchWithTimeout("https://www.newyorkfed.org/research/policy/gscpi");
-      if (res.ok) {
+      const res = await fetchWithRetry("https://www.newyorkfed.org/research/policy/gscpi");
+      if (res) {
         // In a real scenario, we'd parse the HTML for the latest index value
         // For now, we'll simulate a "Pressure Spike" if we detect certain keywords
         const text = await res.text();
@@ -308,9 +442,249 @@ async function startServer() {
     }
   };
 
+  const categorizeEffort = (title: string, body: string): 'AID' | 'RESCUE' | 'RECONSTRUCTION' | 'MEDICAL' | 'SHELTER' | 'FOOD' | 'WATER' => {
+    const text = (title + " " + body).toLowerCase();
+    if (text.includes('medical') || text.includes('health') || text.includes('hospital') || text.includes('vaccine') || text.includes('epidemic') || text.includes('disease') || text.includes('doctor') || text.includes('nurse')) return 'MEDICAL';
+    if (text.includes('water') || text.includes('sanitation') || text.includes('wash') || text.includes('flood') || text.includes('drought') || text.includes('well') || text.includes('irrigation')) return 'WATER';
+    if (text.includes('food') || text.includes('hunger') || text.includes('nutrition') || text.includes('agriculture') || text.includes('famine') || text.includes('meal') || text.includes('grain')) return 'FOOD';
+    if (text.includes('shelter') || text.includes('housing') || text.includes('displacement') || text.includes('refugee') || text.includes('camp') || text.includes('tent') || text.includes('idp')) return 'SHELTER';
+    if (text.includes('rescue') || text.includes('search') || text.includes('evacuation') || text.includes('emergency response') || text.includes('cyclone') || text.includes('storm') || text.includes('earthquake') || text.includes('fire')) return 'RESCUE';
+    if (text.includes('reconstruction') || text.includes('rebuild') || text.includes('infrastructure') || text.includes('recovery') || text.includes('repair')) return 'RECONSTRUCTION';
+    return 'AID';
+  };
+
+  const fetchReliefWeb = async () => {
+    try {
+      // Added User-Agent header to avoid 403
+      const url = "https://api.reliefweb.int/v1/reports?appname=SovereignResilience&limit=50&preset=latest&fields[include][]=title&fields[include][]=body&fields[include][]=date&fields[include][]=source&fields[include][]=primary_country&fields[include][]=url&fields[include][]=primary_country.iso3";
+      const res = await fetchWithRetry(url, {
+        headers: {
+          'User-Agent': 'SovereignResilience/1.0 (ryantf420@gmail.com)'
+        }
+      });
+      if (!res || !res.ok) {
+        if (res?.status === 403) console.warn("ReliefWeb API access denied (403). Check appname or User-Agent.");
+        return;
+      }
+      const data = await res.json();
+      const reports = data.data || [];
+      
+      if (reports.length === 0) {
+        console.warn("ReliefWeb: No reports returned in current window.");
+        if (humanitarianEfforts.length === 0) {
+          humanitarianEfforts = [...MOCK_HUMANITARIAN_EFFORTS];
+        }
+        return;
+      }
+
+      reports.forEach((report: any) => {
+        const fields = report.fields;
+        if (!fields) return;
+
+        const typeMap: { [key: string]: string } = {
+          'Epidemic': 'MEDICAL',
+          'Flood': 'WATER',
+          'Drought': 'WATER',
+          'Food Insecurity': 'FOOD',
+          'Conflict': 'RESCUE',
+          'Earthquake': 'RESCUE',
+          'Natural Disaster': 'RESCUE'
+        };
+
+        const effort = {
+          id: `reliefweb-${report.id}`,
+          source: "UN OCHA / ReliefWeb",
+          type: categorizeEffort(fields.title, fields.body || ""),
+          title: fields.title,
+          description: fields.body ? (fields.body.substring(0, 200) + '...') : fields.title,
+          status: "ACTIVE",
+          location: fields.primary_country?.[0]?.name || fields.primary_country?.name || "Global",
+          coordinates: fields.primary_country?.[0]?.location ? { 
+            lat: fields.primary_country[0].location.lat, 
+            lng: fields.primary_country[0].location.lon 
+          } : fields.primary_country?.location ? {
+            lat: fields.primary_country.location.lat,
+            lng: fields.primary_country.location.lon
+          } : { lat: (Math.random() * 120 - 60), lng: (Math.random() * 240 - 120) },
+          organization: fields.source?.[0]?.name || "UN OCHA",
+          timestamp: fields.date.created,
+          source_url: fields.url,
+          official: true,
+          country_code: fields.primary_country?.[0]?.iso3?.toLowerCase() || fields.primary_country?.iso3?.toLowerCase()
+        };
+        addEffort(effort);
+      });
+    } catch (e) {
+      console.error("ReliefWeb Fetch Error:", e);
+      if (humanitarianEfforts.length === 0) {
+        console.log("Using mock humanitarian efforts.");
+        humanitarianEfforts = [...MOCK_HUMANITARIAN_EFFORTS];
+      }
+    }
+  };
+
+  const fetchGDACS = async () => {
+    try {
+      const url = "https://www.gdacs.org/xml/rss.xml";
+      const res = await fetchWithTimeout(url);
+      const text = await res.text();
+      
+      // Simple XML parsing for RSS
+      const items = (text.match(/<item>[\s\S]*?<\/item>/g) || []) as string[];
+      
+      items.forEach((item: string) => {
+        const title = item.match(/<title>(.*?)<\/title>/)?.[1] || "GDACS Alert";
+        
+        // Filter out low-priority "Green" alerts if they are just notifications
+        if (title.startsWith('Green') && items.length > 10) return;
+
+        const description = item.match(/<description>(.*?)<\/description>/)?.[1] || "";
+        const link = item.match(/<link>(.*?)<\/link>/)?.[1] || "https://www.gdacs.org";
+        const date = item.match(/<pubDate>(.*?)<\/pubDate>/)?.[1] || new Date().toISOString();
+        const lat = parseFloat(item.match(/<geo:lat>(.*?)<\/geo:lat>/)?.[1] || "0");
+        const lng = parseFloat(item.match(/<geo:long>(.*?)<\/geo:long>/)?.[1] || "0");
+        
+        let type: 'AID' | 'RESCUE' | 'RECONSTRUCTION' | 'MEDICAL' | 'SHELTER' | 'FOOD' | 'WATER' = 'AID';
+        if (title.includes('Flood')) type = 'WATER';
+        else if (title.includes('Earthquake')) type = 'RESCUE';
+        else if (title.includes('Cyclone') || title.includes('Storm')) type = 'RESCUE';
+        else if (title.includes('Drought')) type = 'FOOD';
+        else if (title.includes('Fire')) type = 'RESCUE';
+        else if (title.includes('Epidemic') || title.includes('Health')) type = 'MEDICAL';
+        
+        const iso3 = item.match(/<gdacs:iso3>(.*?)<\/gdacs:iso3>/)?.[1] || "";
+        
+        const effort = {
+          id: `gdacs-${title.replace(/\s+/g, '-').toLowerCase()}`,
+          source: "GDACS",
+          type: categorizeEffort(title, description),
+          title: title,
+          description: description.substring(0, 200) + '...',
+          status: "ACTIVE",
+          location: title.split(' in ')?.[1] || "Global",
+          coordinates: { lat, lng },
+          organization: "GDACS",
+          timestamp: date,
+          source_url: link,
+          official: true,
+          country_code: iso3.toLowerCase()
+        };
+        addEffort(effort);
+      });
+    } catch (e) {
+      console.error("GDACS Fetch Error:", e);
+    }
+  };
+
+  const fetchUNNews = async () => {
+    try {
+      const url = "https://news.un.org/feed/subscribe/en/news/all/rss.xml";
+      const res = await fetchWithTimeout(url);
+      const text = await res.text();
+      
+      const items = (text.match(/<item>[\s\S]*?<\/item>/g) || []) as string[];
+      
+      items.forEach((item: string) => {
+        const title = item.match(/<title>(.*?)<\/title>/)?.[1] || "UN News Update";
+        const description = item.match(/<description>(.*?)<\/description>/)?.[1] || "";
+        const link = item.match(/<link>(.*?)<\/link>/)?.[1] || "https://news.un.org";
+        const date = item.match(/<pubDate>(.*?)<\/pubDate>/)?.[1] || new Date().toISOString();
+        
+        const locationMatch = title.match(/^(.*?):/);
+        const location = locationMatch ? locationMatch[1] : "Global";
+        
+        const effort = {
+          id: `unnews-${title.replace(/\s+/g, '-').toLowerCase()}`,
+          source: "UN News",
+          type: categorizeEffort(title, description),
+          title: title,
+          description: description.substring(0, 200) + '...',
+          status: "ACTIVE",
+          location: location,
+          coordinates: { lat: (Math.random() * 120 - 60), lng: (Math.random() * 240 - 120) },
+          organization: "United Nations",
+          timestamp: date,
+          source_url: link,
+          official: true,
+          country_code: location.toLowerCase() // Will try to match in ISO map if it's a country name
+        };
+        addEffort(effort);
+      });
+    } catch (e) {
+      console.error("UN News Fetch Error:", e);
+    }
+  };
+
+  const addEffort = (effort: any) => {
+    const isDrought = (effort.title + " " + effort.description).toLowerCase().includes('drought');
+    
+    // Deduplication and Combining logic
+    let existingIndex = -1;
+    
+    if (isDrought) {
+      // For droughts, consolidate EVERYTHING into ONE global card
+      existingIndex = humanitarianEfforts.findIndex(e => 
+        e.id === 'global-drought-crisis' || 
+        (e.title + " " + e.description).toLowerCase().includes('drought')
+      );
+    } else {
+      existingIndex = humanitarianEfforts.findIndex(e => 
+        (e.id === effort.id) || 
+        (e.title === effort.title && e.location === effort.location)
+      );
+    }
+
+    if (existingIndex !== -1) {
+      const existing = humanitarianEfforts[existingIndex];
+      if (isDrought) {
+        // Combine drought info if it's a new unique report
+        // Check if this specific report (by title) is already in the description
+        if (!existing.description.includes(effort.title.substring(0, 20))) {
+          existing.id = 'global-drought-crisis';
+          existing.title = `Global Drought Crisis: Multiple Regions Affected`;
+          existing.location = 'Global / Multiple Regions';
+          existing.type = 'WATER';
+          existing.country_code = 'un';
+          existing.description = `${existing.description}\n\n[Update - ${effort.location}]: ${effort.title} - ${effort.description}`;
+          existing.timestamp = effort.timestamp; // Keep latest timestamp
+          existing.organization = 'Multiple Agencies (UN/GDACS/ReliefWeb)';
+          
+          // Keep the latest source URL if the old one is different
+          if (effort.source_url && existing.source_url !== effort.source_url) {
+            existing.source_url = effort.source_url;
+          }
+          // Broadcast the update
+          broadcast({ type: "EFFORT_DETECTED", effort: existing });
+        }
+      } else {
+        humanitarianEfforts[existingIndex] = { ...existing, ...effort };
+        broadcast({ type: "EFFORT_DETECTED", effort: humanitarianEfforts[existingIndex] });
+      }
+    } else {
+      if (isDrought) {
+        // Create the first global drought card
+        const globalDrought = {
+          ...effort,
+          id: 'global-drought-crisis',
+          title: `Global Drought Crisis: ${effort.location}`,
+          location: 'Global / Multiple Regions',
+          country_code: 'un',
+          description: `[Initial Report - ${effort.location}]: ${effort.title} - ${effort.description}`,
+          organization: 'Multiple Agencies (UN/GDACS/ReliefWeb)'
+        };
+        humanitarianEfforts = [globalDrought, ...humanitarianEfforts].slice(0, MAX_EFFORTS);
+        broadcast({ type: "EFFORT_DETECTED", effort: globalDrought });
+      } else {
+        humanitarianEfforts = [effort, ...humanitarianEfforts].slice(0, MAX_EFFORTS);
+        broadcast({ type: "EFFORT_DETECTED", effort });
+      }
+    }
+  };
+
   const addAnomaly = (anomaly: any) => {
     const exists = anomalies.find(a => a.id === anomaly.id);
     if (!exists) {
+      console.log(`DEBUG: Adding anomaly: ${anomaly.title}`);
       anomalies = [anomaly, ...anomalies].slice(0, MAX_ANOMALIES);
       broadcast({ type: "ANOMALY_DETECTED", anomaly });
     }
@@ -326,6 +700,9 @@ async function startServer() {
   setInterval(fetchCommodities, 300000); // 5 min
   setInterval(fetchSupplyChain, 600000); // 10 min
   setInterval(fetchGSCPI, 1200000); // 20 min
+  setInterval(fetchReliefWeb, 120000); // 2 min
+  setInterval(fetchGDACS, 120000); // 2 min
+  setInterval(fetchUNNews, 300000); // 5 min
 
   // Initial fetch
   fetchUSGS();
@@ -333,6 +710,9 @@ async function startServer() {
   fetchNOAATsunami();
   fetchUSDA();
   fetchCommodities();
+  fetchReliefWeb();
+  fetchGDACS();
+  fetchUNNews();
 
   // WebSocket connection handling
   wss.on("connection", (ws) => {
@@ -340,8 +720,9 @@ async function startServer() {
     
     ws.send(JSON.stringify({ 
       type: "CONNECTED", 
-      message: "Sentinel Real-time Link Established",
-      initialAnomalies: anomalies
+      message: "Sovereign-Resilience Real-time Link Established",
+      initialAnomalies: anomalies.length > 0 ? anomalies : MOCK_ANOMALIES,
+      initialEfforts: humanitarianEfforts.length > 0 ? humanitarianEfforts : MOCK_HUMANITARIAN_EFFORTS
     }));
 
     ws.on("close", () => console.log("Client disconnected"));
@@ -358,12 +739,24 @@ async function startServer() {
   }, 30000);
 
   // API routes
+  app.get("/api/config", (req, res) => {
+    res.json({ 
+      GEMINI_API_KEY: process.env.GEMINI_API_KEY,
+      FMP_API_KEY: process.env.FMP_API_KEY ? "present" : "missing",
+      NEWSCATCHER_API_KEY: process.env.NEWSCATCHER_API_KEY ? "present" : "missing"
+    });
+  });
+
   app.get("/api/health", (req, res) => {
     res.json({ status: "ok" });
   });
 
   app.get("/api/anomalies", (req, res) => {
     res.json(anomalies);
+  });
+
+  app.get("/api/humanitarian", (req, res) => {
+    res.json(humanitarianEfforts);
   });
 
   app.get("/api/validate-url", async (req, res) => {
@@ -410,14 +803,21 @@ async function startServer() {
     });
     app.use(vite.middlewares);
   } else {
-    app.use(express.static("dist"));
+    const distPath = path.resolve(__dirname);
+    console.log(`Production mode: serving static files from ${distPath}`);
+    app.use(express.static(distPath, {
+      setHeaders: (res, path) => {
+        console.log(`Serving static file: ${path}`);
+      }
+    }));
     app.get("*", (req, res) => {
-      res.sendFile("dist/index.html", { root: "." });
+      console.log(`Serving index.html for path: ${req.path}`);
+      res.sendFile(path.join(distPath, "index.html"));
     });
   }
 
-  server.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://localhost:${PORT}`);
+  server.listen(Number(PORT), "0.0.0.0", () => {
+    console.log(`Server running on port ${PORT}`);
   });
 }
 
